@@ -23,6 +23,7 @@ import { ActivityRepository } from "../repositories/activity-repository";
 import { DownloadSettingsService } from "../services/download-settings-service";
 import { ActivityService } from "../services/activity-service";
 import { LibraryService } from "./library-service";
+import * as fingerprinting from "./content-fingerprint";
 
 describe("local media library", () => {
   let directory: string;
@@ -31,6 +32,7 @@ describe("local media library", () => {
   let settings: DownloadSettingsService;
   let activity: ActivityService;
   let service: LibraryService;
+  let fingerprintEnabled = false;
   const probe = vi.fn(async (path: string): Promise<MediaProbe> => ({
     duration: 12,
     width: 320,
@@ -82,6 +84,95 @@ describe("local media library", () => {
     fileSize: item.fileSize,
     modifiedAt: item.modifiedAt,
   });
+  const deferFingerprint = () => {
+    const original = fingerprinting.contentFingerprint;
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(fingerprinting, "contentFingerprint").mockImplementationOnce(async (path, signal) => {
+      const result = await original(path, signal);
+      entered();
+      await gate;
+      return result;
+    });
+    return { started, release };
+  };
+  it("retains a backfilled fingerprint when refresh restores local availability", async () => {
+    const item = await uploaded({ localAvailable: false });
+    fingerprintEnabled = true;
+    await service.refresh();
+    expect(service.get(item.id)).toMatchObject({
+      localAvailable: true,
+      contentFingerprint: expect.stringMatching(/^sample-v1:/),
+      driveFileId: item.driveFileId,
+      driveStatus: "completed",
+    });
+  });
+  it("does not resurrect a record removed while refresh backfills its fingerprint", async () => {
+    const item = await uploaded({ localAvailable: false });
+    fingerprintEnabled = true;
+    const hash = deferFingerprint();
+    const refresh = service.refresh();
+    await hash.started;
+    try {
+      service.remove(item.id);
+    } finally {
+      hash.release();
+    }
+    await refresh;
+    expect(repository.get(item.id)).toBeUndefined();
+    await expect(access(item.localPath)).resolves.toBeUndefined();
+  });
+  it("preserves cloud metadata committed while refresh backfills a restored file", async () => {
+    const item = await uploaded({ localAvailable: false });
+    fingerprintEnabled = true;
+    const hash = deferFingerprint();
+    const refresh = service.refresh();
+    await hash.started;
+    try {
+      repository.save({
+        ...service.get(item.id),
+        driveFileId: "new-cloud-file",
+        driveUploadedAt: 5678,
+      });
+    } finally {
+      hash.release();
+    }
+    await refresh;
+    expect(service.get(item.id)).toMatchObject({
+      localAvailable: true,
+      contentFingerprint: expect.stringMatching(/^sample-v1:/),
+      driveFileId: "new-cloud-file",
+      driveUploadedAt: 5678,
+    });
+  });
+  it("optionally skips simultaneous content copies without deleting either file", async () => {
+    fingerprintEnabled = true;
+    const first = await fixture("original.mp4"),
+      second = await fixture("copy.mp4");
+    expect(await service.importFiles([first, second])).toEqual({ added: 1, skipped: 1, failed: 0 });
+    expect(service.list()).toHaveLength(1);
+    expect(service.list()[0]?.contentFingerprint).toMatch(/^sample-v1:/);
+    await expect(access(first)).resolves.toBeUndefined();
+    await expect(access(second)).resolves.toBeUndefined();
+  });
+  it("backfills optional fingerprints on refresh and ignores stale duplicate records", async () => {
+    const first = await fixture("original.mp4"),
+      second = await fixture("copy.mp4");
+    await service.importFiles([first]);
+    expect(service.list()[0]?.contentFingerprint).toBeUndefined();
+    fingerprintEnabled = true;
+    await service.refresh();
+    expect(service.list()[0]?.contentFingerprint).toMatch(/^sample-v1:/);
+    expect((await service.importFiles([second])).skipped).toBe(1);
+    await unlink(first);
+    expect((await service.importFiles([second])).added).toBe(1);
+  });
   it("keeps local bytes when disconnect aborts post-upload deletion during validation", async () => {
     const item = await uploaded();
     const controller = new AbortController();
@@ -98,6 +189,7 @@ describe("local media library", () => {
     expect(repository.get(item.id)?.localAvailable).toBe(true);
   });
   beforeEach(async () => {
+    fingerprintEnabled = false;
     directory = await mkdtemp(join(tmpdir(), "mediavault-library-"));
     database = new SqliteDatabase(join(directory, "data"));
     repository = new MediaRepository(database);
@@ -113,6 +205,7 @@ describe("local media library", () => {
       media: repository,
       settings,
       activity,
+      fingerprintEnabled: () => fingerprintEnabled,
       ffmpeg: { probeMedia: probe, extractThumbnail: thumbnail },
     });
   });

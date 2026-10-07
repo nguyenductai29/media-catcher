@@ -405,6 +405,7 @@
     "analyzerHint": "Install the media analyzer to inspect page metadata and formats. Network detection is available without it.",
     "refreshStatus": "Refresh status",
     "checking": "Checking…",
+    "invalidStartupPaths": "MediaVault could not open its data folders. Use absolute folder paths outside the application installation directory.",
     "errors": {
       "invalidUrl": "Enter a valid HTTP or HTTPS website address.",
       "invalidInput": "Check the supplied information and try again.",
@@ -439,7 +440,20 @@
       "driveAccountChanged": "This file belongs to another Google account. Connect that account to continue.",
       "driveAlreadyUploaded": "This file already has a verified Drive copy.",
       "driveUnavailable": "Google Drive is temporarily unavailable. Try again.",
-      "networkUnavailable": "The network is unavailable. Check your connection and retry."
+      "networkUnavailable": "The network is unavailable. Check your connection and retry.",
+      "startupFailed": "Windows startup could not be updated. Try again.",
+      "startupUnsupported": "Windows startup is available in the installed Windows app.",
+      "productSettingsFailed": "General settings could not be loaded or saved. Try again.",
+      "browserSessionRequired": "Sign in to this website in the MediaVault browser, then try again.",
+      "storageFailed": "Storage could not be read or updated. Try again.",
+      "databaseRecoveryFailed": "The database could not be restored. Your existing files have been kept.",
+      "publicationUnavailable": "This folder cannot safely publish recoverable downloads. Choose a folder on an NTFS drive.",
+      "updateFailed": "The update could not be completed. Check your connection and try again.",
+      "updateBusy": "Finish active work before updating or restarting MediaVault.",
+      "updateNotConfigured": "App updates are not configured in this build.",
+      "updateChecksumMismatch": "The downloaded update did not match its checksum. The current version has been kept.",
+      "updateUnsupported": "Updates are not supported in this environment.",
+      "diagnosticsFailed": "Diagnostics could not be read, copied or exported. Refresh and try again."
     },
     "downloadReady": "Choose a detected source to download.",
     "librarySize": "Library: {size}"
@@ -471,5 +485,182 @@
     "filename": "Estimated output filename",
     "originalExtension": "original extension",
     "filenameHint": "The final name may be adjusted for valid characters and existing files."
+  },
+  "product": {
+    "closeBehavior": "When closing the window",
+    "close": {
+      "tray": "Minimize to tray",
+      "exit": "Exit application"
+    },
+    "appearance": "Appearance",
+    "theme": {
+      "dark": "Dark",
+      "light": "Light",
+      "system": "System"
+    },
+    "backgroundHint": "Downloads and uploads continue while MediaVault is minimized or hidden in the tray.",
+    "trayUnavailable": "The system tray is unavailable. Closing will exit, with confirmation if work is active.",
+    "startupUnsupported": "Windows startup is available in the installed Windows app.",
+    "save": "Save general settings",
+    "saved": "General settings saved",
+    "exit": "Exit MediaVault"
+  },
+  "onboarding": {
+    "title": "Welcome to MediaVault",
+    "hint": "Choose a few defaults before you start. You can change them later in Settings.",
+    "progress": "Step {step} of {total}",
+    "next": "Next",
+    "back": "Back",
+    "skip": "Skip",
+    "finish": "Finish",
+    "steps": {
+      "language": "Language",
+      "folder": "Download folder",
+      "quality": "Default quality",
+      "format": "Default format",
+      "drive": "Google Drive",
+      "background": "Background behavior"
+    },
+    "languages": {
+      "en": "English",
+      "vi": "Tiếng Việt"
+    },
+    "folderHint": "New downloads will be saved in this folder.",
+    "driveHint": "Connect Google Drive to back up your library, or skip and connect later."
+  },
+  "tray": {
+    "open": "Open MediaVault",
+    "downloads": "Downloads",
+    "pauseDownloads": "Pause All Downloads",
+    "resumeDownloads": "Resume All Downloads",
+    "pauseUploads": "Pause All Uploads",
+    "resumeUploads": "Resume All Uploads",
+    "settings": "Settings",
+    "exit": "Exit",
+    "activeTooltip": "MediaVault · {downloads} downloads · {uploads} uploads"
+  },
+  "storage": {
+    "overview": "Space used by MediaVault",
+    "refresh": "Refresh storage",
+    "sizes": {
+      "downloads": "Downloads",
+      "temp": "Temporary files",
+      "thumbnails": "Thumbnails",
+      "database": "Database",
+      "logs": "Logs"
+    },
+    "clean": {
+      "staleTemp": "Clean stale temp",
+      "oldLogs": "Clean old logs",
+      "unusedThumbnails": "Clean unused thumbnails"
+    },
+    "cleaned": {
+      "staleTemp": "Temporary file cleanup completed.",
+      "oldLogs": "Log cleanup completed.",
+      "unusedThumbnails": "Thumbnail cleanup completed."
+    },
+    "cleanupHint": "Cleanup is limited to MediaVault temporary files, old logs and unused thumbnails. Your videos are kept.",
+    "fingerprint": "Detect duplicate imports using file samples",
+    "fingerprintHint": "Compare small samples from local files to detect duplicate imports without reading entire videos. This option is off by default.",
+    "fingerprintSaved": "Duplicate detection setting saved"
+  },
+  "maintenance": {
+    "appTitle": "App updates",
+    "currentVersion": "Current version",
+    "latestVersion": "Latest version",
+    "notChecked": "Not checked",
+    "ytCurrent": "Current yt-dlp version",
+    "ytLatest": "Latest yt-dlp version",
+    "checkYtDlp": "Check yt-dlp update",
+    "updateYtDlp": "Update yt-dlp",
+    "ytUpdated": "yt-dlp updated successfully.",
+    "ytHint": "Updates are checked only when requested. Active media work must finish before replacing yt-dlp.",
+    "ytBusyHint": "yt-dlp was busy at the last check. Check again to refresh its status.",
+    "updating": "Updating…",
+    "ffmpegSource": "FFmpeg build source",
+    "checkApp": "Check for updates",
+    "downloadApp": "Download update",
+    "installApp": "Install update and exit",
+    "installing": "Exiting to install the update…",
+    "refresh": "Refresh update status",
+    "appStatus": {
+      "unconfigured": "App updates are not configured in this build.",
+      "idle": "Check for updates when you are ready.",
+      "checking": "Checking for updates…",
+      "current": "MediaVault is up to date.",
+      "available": "An update is available to download.",
+      "downloading": "Downloading the update…",
+      "ready": "The update is ready. Finish active work before installing and exiting."
+    }
+  },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "hint": "Local app information and sanitized logs. Export includes versions, settings and safe logs, without file paths, passwords, cookies or account tokens.",
+    "refresh": "Refresh diagnostics",
+    "exportTitle": "Export diagnostics",
+    "exportFilter": "JSON diagnostics",
+    "exported": "Diagnostics exported.",
+    "openLogs": "Open log folder",
+    "logs": "Safe logs",
+    "component": "Component",
+    "kind": "Entry type",
+    "allComponents": "All components",
+    "allKinds": "All entries",
+    "copy": "Copy selected entry",
+    "copied": "Log entry copied.",
+    "clear": "Clear logs",
+    "cleared": "Logs cleared.",
+    "limit": "Showing up to {count} recent entries. Logs contain event and error codes only.",
+    "select": "Select",
+    "selectEntry": "Select log entry at {time}",
+    "time": "Time",
+    "message": "Details",
+    "empty": "No matching log entries.",
+    "working": "Working…",
+    "yes": "Yes",
+    "no": "No",
+    "kinds": { "error": "Error", "event": "Event" },
+    "session": { "persistent": "Persistent", "temporary": "Temporary" },
+    "components": {
+      "download": "Downloads",
+      "upload": "Uploads",
+      "drive": "Google Drive",
+      "ipc": "Desktop bridge",
+      "startup": "Startup",
+      "shutdown": "Shutdown",
+      "browser": "Browser",
+      "update": "Updates",
+      "diagnostics": "Diagnostics"
+    },
+    "events": {
+      "authAnalysisRetry": "Analysis retried using the browser session.",
+      "authDownloadUsed": "Download used the browser session.",
+      "cookieCleanupFailed": "Temporary browser session data could not be cleaned up."
+    },
+    "fields": {
+      "appVersion": "MediaVault version",
+      "electronVersion": "Electron version",
+      "nodeVersion": "Node.js version",
+      "platform": "Platform",
+      "architecture": "Architecture",
+      "schemaVersion": "Database schema",
+      "databasePath": "Database path",
+      "downloadFolder": "Download folder",
+      "driveConnected": "Google Drive connected",
+      "browserSession": "Browser session mode",
+      "activeDownloads": "Active downloads",
+      "activeUploads": "Active uploads",
+      "availableDiskSpace": "Available disk space",
+      "downloadConcurrency": "Download concurrency",
+      "uploadConcurrency": "Upload concurrency"
+    }
+  },
+  "databaseRecovery": {
+    "title": "MediaVault data needs recovery",
+    "message": "MediaVault could not open its database. Your existing data has been kept.",
+    "openFolder": "Open Data Folder",
+    "restore": "Restore Latest Backup",
+    "confirmRestore": "Restore the latest backup? The current database will be preserved before restoring.",
+    "noBackup": "No valid database backup is available."
   }
 }

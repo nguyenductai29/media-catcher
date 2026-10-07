@@ -5,7 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteDatabase } from "./database";
-import { applyMigrations } from "./migrations";
+import { applyMigrations, migrations } from "./migrations";
 
 describe("SQLite startup and migrations", () => {
   let directory: string;
@@ -22,7 +22,7 @@ describe("SQLite startup and migrations", () => {
     const userData = join(directory, "profile");
     database = new SqliteDatabase(userData);
     const inspector = new Database(join(userData, "mediavault.db"));
-    expect(inspector.pragma("user_version", { simple: true })).toBe(2);
+    expect(inspector.pragma("user_version", { simple: true })).toBe(migrations.length);
     expect(
       inspector.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all(),
     ).toEqual([

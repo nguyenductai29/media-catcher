@@ -1,4 +1,108 @@
+export interface ProductPreferences {
+  closeBehavior: "tray" | "exit";
+  startWithWindows: boolean;
+  theme: "dark" | "light" | "system";
+}
+export interface ProductSettings extends ProductPreferences {
+  firstLaunchCompleted: boolean;
+  startupSupported: boolean;
+  trayAvailable: boolean;
+}
+export type ProductRoute = "/" | "/downloads" | "/settings";
+
+export interface StorageSnapshot {
+  downloads: number;
+  temp: number;
+  thumbnails: number;
+  database: number;
+  logs: number;
+  fingerprintEnabled: boolean;
+}
+export type StorageCleanup = "staleTemp" | "oldLogs" | "unusedThumbnails";
+
+export interface YtDlpUpdateState {
+  currentVersion: string | null;
+  latestVersion: string | null;
+  available: boolean;
+  supported: boolean;
+  busy: boolean;
+}
+export interface AppUpdateState {
+  configured: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  status: "unconfigured" | "idle" | "checking" | "current" | "available" | "downloading" | "ready";
+}
+export interface MaintenanceSnapshot {
+  ytDlp: YtDlpUpdateState;
+  app: AppUpdateState;
+  ffmpegSource: string;
+}
+export type LogComponent =
+  | "download"
+  | "upload"
+  | "drive"
+  | "ipc"
+  | "startup"
+  | "shutdown"
+  | "browser"
+  | "update"
+  | "diagnostics";
+export type LogEvent = "authAnalysisRetry" | "authDownloadUsed" | "cookieCleanupFailed";
+export interface DiagnosticLogEntry {
+  id: string;
+  time: string;
+  component: LogComponent;
+  code: ErrorCode | null;
+  event: LogEvent | null;
+}
+export interface LogFilter {
+  component?: LogComponent;
+  kind?: "error" | "event";
+}
+export interface DiagnosticsSnapshot {
+  appVersion: string;
+  electronVersion: string;
+  nodeVersion: string;
+  platform: string;
+  architecture: string;
+  schemaVersion: number;
+  databasePath: string;
+  downloadFolder: string;
+  binaries: BinaryStatuses;
+  driveConnected: boolean;
+  browserSession: "persistent" | "temporary";
+  activeDownloads: number;
+  activeUploads: number;
+  availableDiskSpace: number | null;
+  settings: {
+    language: "en" | "vi";
+    theme: ProductPreferences["theme"];
+    closeBehavior: ProductPreferences["closeBehavior"];
+    startWithWindows: boolean;
+    quality: DownloadSettings["quality"];
+    container: DownloadSettings["container"];
+    downloadConcurrency: number;
+    uploadConcurrency: number;
+    autoUpload: boolean;
+    deleteLocal: DriveSettings["deleteLocal"];
+  };
+}
+
 export type ErrorCode =
+  | "updateFailed"
+  | "updateBusy"
+  | "updateNotConfigured"
+  | "updateChecksumMismatch"
+  | "updateUnsupported"
+  | "diagnosticsFailed"
+  | "startupFailed"
+  | "startupUnsupported"
+  | "productSettingsFailed"
+  | "browserSessionRequired"
+  | "storageFailed"
+  | "databaseRecoveryFailed"
+  | "publicationUnavailable"
   | "invalidUrl"
   | "invalidInput"
   | "unavailable"
@@ -63,6 +167,7 @@ export interface DetectedMedia {
   formatId?: string;
   hasAudio?: boolean;
   detectedAt: number;
+  requiresBrowserSession?: boolean;
 }
 export interface PageAnalysis {
   title: string;
@@ -150,6 +255,8 @@ export interface DownloadJob {
   attempts: number;
   /** Whether the extractor URL is a page with selectable format IDs. */
   fromAnalysis: boolean;
+  /** Authentication is acquired from the current MediaVault session just in time. */
+  requiresBrowserSession?: boolean;
 }
 export interface MediaProbe {
   duration?: number;
@@ -181,6 +288,8 @@ export interface MediaItem {
   bitrate?: number;
   fileSize: number;
   modifiedAt: number;
+  /** Sampled duplicate hint only; never an integrity or upload verification hash. */
+  contentFingerprint?: string;
   createdAt: number;
   updatedAt: number;
   /** Absent on legacy local-only records means true. Keep last-known path for recovery. */

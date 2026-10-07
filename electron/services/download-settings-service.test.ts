@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SqliteDatabase } from "../database/database";
@@ -68,5 +68,42 @@ describe("persisted download preferences", () => {
       await mkdir(directory, { recursive: true });
       await expect(service.approveDirectory(directory)).rejects.toThrow("invalidInput");
     }
+  });
+  it("replaces persisted download locations in the installation tree with the external default", async () => {
+    const { root, repo, service: defaults } = await setup();
+    const installation = join(root, "Programs", "MediaVault");
+    const resources = join(installation, "resources");
+    await mkdir(resources, { recursive: true });
+    for (const directory of [installation, join(installation, "Downloads")]) {
+      repo.set("downloads", { ...defaults.get(), directory });
+      const restored = new DownloadSettingsService(repo, join(root, "Videos"), [
+        join(resources, "app.asar"),
+        resources,
+        installation,
+      ]);
+      expect(restored.get().directory).toBe(join(root, "Videos", "MediaVault", "Downloads"));
+      await expect(restored.validateDirectory(directory)).rejects.toThrow("invalidInput");
+    }
+  });
+  it("rejects native selection of the installation root, children, and junction aliases", async () => {
+    const { root, repo } = await setup();
+    const installation = join(root, "Programs", "MediaVault");
+    const resources = join(installation, "resources");
+    const child = join(installation, "Downloads");
+    await mkdir(resources, { recursive: true });
+    await mkdir(child);
+    const service = new DownloadSettingsService(repo, join(root, "Videos"), [
+      join(resources, "app.asar"),
+      resources,
+      installation,
+    ]);
+    for (const directory of [installation, child])
+      await expect(service.approveDirectory(directory)).rejects.toThrow("invalidInput");
+    const alias = join(root, "selected-folder");
+    await symlink(installation, alias, process.platform === "win32" ? "junction" : "dir");
+    await expect(service.approveDirectory(alias)).rejects.toThrow("fileAccessDenied");
+    await expect(service.approveDirectory(join(alias, "Downloads"))).rejects.toThrow(
+      "fileAccessDenied",
+    );
   });
 });

@@ -1,15 +1,13 @@
 // Explicit, interactive real-account verification. Normal smoke/CI never imports this file.
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { createReadStream } from "node:fs";
-import { access, mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { _electron as electron } from "playwright";
+import { generateFixtures, parseGeneratorArguments } from "./generate-fixtures.mjs";
+import { startFixtureServer } from "./fixture-server.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 if (process.argv.includes("--help")) {
@@ -19,8 +17,12 @@ Set GOOGLE_CLIENT_ID for your OAuth Desktop client, optionally GOOGLE_CLIENT_SEC
 Read docs/google-drive-setup.md, then run npm run test:drive:manual.
 To load a local env file: node --env-file=.env.local scripts/test-drive-manual.mjs
 Build first with npm run build:desktop; install tools with npm run setup:ffmpeg.
+For an installed/built app, add --packaged-executable ABSOLUTE_EXE_PATH.
+That option uses its bundled FFmpeg tools and isolated --user-data-dir arguments.
 
-The helper generates one tiny MP4, serves it only on localhost, and opens an isolated
+Optional larger playable fixture: npm run test:drive:manual -- --large-mib 128
+The size accepts 16..2048 MiB; generation uses real video, never sparse padding.
+The helper generates 10s/60s MP4 and HLS, serves only on localhost, and opens an isolated
 profile. It never initiates login, chooses user media, uploads, or deletes for you.
 Use the actual app UI. Terminal commands: status, restart, help, quit.
 The generated files/profile remain in the printed temporary directory for inspection.
@@ -28,104 +30,69 @@ Disconnect before removing that directory. Uploaded fixtures remain on Google Dr
 until you remove them yourself. No credential values are printed.`);
   process.exit(0);
 }
+const arguments_ = process.argv.slice(2);
+const fixtureArguments = [];
+const seenArguments = new Set();
+let packagedExecutable;
+for (let index = 0; index < arguments_.length; index++) {
+  const key = arguments_[index];
+  const value = arguments_[++index];
+  if (seenArguments.has(key) || !value || value.startsWith("--"))
+    throw new Error("Invalid manual helper arguments; use --help.");
+  seenArguments.add(key);
+  if (key === "--large-mib") fixtureArguments.push(key, value);
+  else if (
+    key === "--packaged-executable" &&
+    isAbsolute(value) &&
+    extname(value).toLowerCase() === ".exe" &&
+    !/[\p{Cc}]/u.test(value)
+  )
+    packagedExecutable = value;
+  else
+    throw new Error(
+      "Manual helper accepts --large-mib 16..2048 and --packaged-executable ABSOLUTE_EXE_PATH.",
+    );
+}
+const { largeMiB } = parseGeneratorArguments(fixtureArguments);
 
 if (!process.stdin.isTTY) throw new Error("Run this manual helper in an interactive terminal.");
 if (!process.env.GOOGLE_CLIENT_ID?.trim())
   throw new Error(
     "Set GOOGLE_CLIENT_ID first; see docs/google-drive-setup.md. No login was started.",
   );
-for (const path of [
-  "dist-electron/main.cjs",
-  "dist-electron/preload.cjs",
-  "dist-desktop/index.html",
-])
-  await access(join(root, path)).catch(() => {
-    throw new Error("Build the desktop app first: npm run build:desktop");
+for (const path of packagedExecutable
+  ? [packagedExecutable, join(dirname(packagedExecutable), "resources", "app.asar")]
+  : ["dist-electron/main.cjs", "dist-electron/preload.cjs", "dist-desktop/index.html"])
+  await access(isAbsolute(path) ? path : join(root, path)).catch(() => {
+    throw new Error(
+      "Build the desktop app first or select a valid packaged MediaVault executable.",
+    );
   });
 
 const scratch = await mkdtemp(join(tmpdir(), "mediavault-drive-manual-"));
 const profile = join(scratch, "profile");
-const filename = `MediaVault-drive-fixture-${Date.now()}.mp4`;
-const fixture = join(scratch, filename);
 await mkdir(profile);
-await promisify(execFile)(
-  join(root, "resources", "bin", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"),
-  [
-    "-nostdin",
-    "-hide_banner",
-    "-v",
-    "error",
-    "-n",
-    "-f",
-    "lavfi",
-    "-i",
-    "testsrc2=size=320x180:rate=24",
-    "-f",
-    "lavfi",
-    "-i",
-    "sine=frequency=440:sample_rate=44100",
-    "-t",
-    "3",
-    "-c:v",
-    "libx264",
-    "-pix_fmt",
-    "yuv420p",
-    "-preset",
-    "ultrafast",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "64k",
-    "-movflags",
-    "+faststart",
-    "-shortest",
-    fixture,
-  ],
-  { windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 },
-).catch(() => {
-  throw new Error("Fixture generation failed. Install FFmpeg: npm run setup:ffmpeg");
+const generated = await generateFixtures({
+  outputDirectory: join(scratch, "generated"),
+  largeMiB,
+  ...(packagedExecutable
+    ? {
+        ffmpegPath: join(dirname(packagedExecutable), "resources", "bin", "ffmpeg.exe"),
+        ffprobePath: join(dirname(packagedExecutable), "resources", "bin", "ffprobe.exe"),
+      }
+    : {}),
 });
-const size = (await stat(fixture)).size;
-const server = createServer((request, response) => {
-  if (request.url === "/fixture.mp4") {
-    const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
-    const start = range ? Number(range[1]) : 0;
-    const end = range?.[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
-    if (start >= size || start > end) {
-      response.writeHead(416);
-      response.end();
-      return;
-    }
-    response.writeHead(range ? 206 : 200, {
-      "Content-Type": "video/mp4",
-      "Content-Length": end - start + 1,
-      "Accept-Ranges": "bytes",
-      ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
-    });
-    if (request.method === "HEAD") {
-      response.end();
-      return;
-    }
-    const stream = createReadStream(fixture, { start, end });
-    response.on("close", () => stream.destroy());
-    stream.on("error", () => response.destroy());
-    stream.pipe(response);
-  } else if (request.url === "/") {
-    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    response.end(
-      `<!doctype html><title>${filename}</title><h1>MediaVault generated Drive fixture</h1><p>Three seconds of generated test video and audio. No user media.</p><video controls preload="none"><source src="/fixture.mp4" type="video/mp4"></video>`,
-    );
-  } else {
-    response.writeHead(404);
-    response.end();
-  }
-});
-await new Promise((done) => server.listen(0, "127.0.0.1", done));
-const origin = `http://127.0.0.1:${server.address().port}`;
+const fixture = join(generated.directory, "clip-10s.mp4");
+const largerFixture = largeMiB ? join(generated.directory, "large.mp4") : null;
+const server = await startFixtureServer({ directory: generated.directory });
+const origin = server.origin;
 await writeFile(
   join(profile, "browser-settings.json"),
-  JSON.stringify({ version: 1, homepage: origin, saveSession: true }),
-);
+  JSON.stringify({ version: 1, homepage: `${origin}/video-10s`, saveSession: true }),
+).catch(async () => {
+  await server.close();
+  throw new Error("Could not initialize the isolated manual profile.");
+});
 
 let app;
 let page;
@@ -139,7 +106,23 @@ async function launch() {
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.MEDIAVAULT_DEV_URL;
-  app = await electron.launch({ args: ["."], cwd: root, env, timeout: 30_000 });
+  for (const name of ["MEDIAVAULT_YTDLP_PATH", "MEDIAVAULT_FFMPEG_PATH", "MEDIAVAULT_FFPROBE_PATH"])
+    delete env[name];
+  if (packagedExecutable) {
+    delete env.MEDIAVAULT_USER_DATA;
+    delete env.MEDIAVAULT_VIDEOS_DIR;
+    delete env.NODE_PATH;
+    delete env.NODE_OPTIONS;
+  }
+  app = await electron.launch({
+    ...(packagedExecutable ? { executablePath: packagedExecutable } : {}),
+    args: packagedExecutable
+      ? [`--user-data-dir=${profile}`, `--media-videos-dir=${join(scratch, "videos")}`]
+      : ["."],
+    cwd: packagedExecutable ? dirname(packagedExecutable) : root,
+    env,
+    timeout: 30_000,
+  });
   closed = false;
   app.on("close", () => {
     closed = true;
@@ -151,6 +134,21 @@ async function launch() {
     if (!page) await delay(100);
   }
   await page.waitForFunction(() => Boolean(window.mediaVault?.drive));
+  const profileMatches = await app.evaluate(
+    ({ app }, expected) => {
+      const path = process.getBuiltinModule("path");
+      const actual = path.resolve(app.getPath("userData"));
+      const requested = path.resolve(expected.directory);
+      return (
+        (!expected.packaged || app.isPackaged) &&
+        (process.platform === "win32"
+          ? actual.toLowerCase() === requested.toLowerCase()
+          : actual === requested)
+      );
+    },
+    { directory: profile, packaged: Boolean(packagedExecutable) },
+  );
+  assert.equal(profileMatches, true, "Application did not use the isolated manual profile");
   console.log(
     "Isolated MediaVault opened. Use the app UI for Connect and all upload/delete actions.",
   );
@@ -207,7 +205,7 @@ async function requestClose() {
   );
   await page
     .evaluate(() => {
-      void window.mediaVault.window.close();
+      void window.mediaVault.window.exit();
     })
     .catch(() => {});
   const didClose = await ended;
@@ -218,14 +216,16 @@ async function requestClose() {
 function instructions() {
   console.log(`
 Generated fixture: ${fixture}
-Local download page: ${origin}/
+60-second fixture: ${join(generated.directory, "clip-60s.mp4")}
+Larger fixture: ${largerFixture ?? "not generated; rerun with --large-mib 128 for a fresh isolated profile"}
+Local download page: ${origin}/video-10s
 Isolated profile: ${profile}
 
 1. In Google Drive, select Connect and authorize in your system browser.
 2. In Library, Add file and choose only the generated fixture above.
 3. Keep Settings > Delete behavior = Never. Upload from Library. Check real progress,
    verified completion, Local + Drive, Open in Drive, and that the local file remains.
-4. For pause/resume/cancel/retry, act while an upload is active. Tiny files may finish
+4. Upload the larger generated fixture for pause/resume/cancel/retry. Small files may finish
    before Pause; do not report a skipped race as tested. Type restart while paused,
    confirm the account survives and work remains paused, then Resume in the UI.
 5. For auto-upload, enable it and download the local page above through Browser.
@@ -270,8 +270,7 @@ try {
 } finally {
   terminal.close();
   if (!closed) await requestClose().catch(() => {});
-  server.closeAllConnections();
-  await new Promise((done) => server.close(done));
+  await server.close();
   console.log(`Generated data retained for inspection: ${scratch}`);
   console.log(
     "Disconnect the test account before removing the profile. Cloud test files require manual cleanup.",

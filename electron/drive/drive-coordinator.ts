@@ -280,6 +280,16 @@ export class DriveCoordinator {
   hasActiveWork(): boolean {
     return this.deps.uploads.hasActiveWork();
   }
+  pauseAll(): Promise<void> {
+    if (this.closing) return Promise.reject(new Error("unavailable"));
+    return this.deps.uploads.pauseAll();
+  }
+  resumeAll(): void {
+    const accountId = this.account();
+    for (const job of this.deps.uploads.list())
+      if (job.providerAccountId === accountId && ["paused", "finalizing"].includes(job.status))
+        this.deps.uploads.resume(job.id);
+  }
   withMediaLock<T>(id: string, action: () => T | Promise<T>): Promise<T> {
     if (this.closing) return Promise.reject(new Error("unavailable"));
     return this.deps.uploads.withMediaLock(id, action);
@@ -352,8 +362,14 @@ export class DriveCoordinator {
     this.deletionTail = run;
     return run;
   }
-  async shutdown(): Promise<void> {
-    if (this.closing) return;
+  private shutdownWork: Promise<void> | undefined;
+  shutdown(): Promise<void> {
+    return (this.shutdownWork ??= this.drain().catch((error: unknown) => {
+      this.shutdownWork = undefined;
+      throw error;
+    }));
+  }
+  private async drain(): Promise<void> {
     this.closing = true;
     this.epoch++;
     this.lifecycle.abort();

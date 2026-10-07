@@ -5,7 +5,73 @@ import type {
   DownloadJob,
   DriveSnapshot,
   MediaItem,
+  ProductSettings,
+  StorageSnapshot,
+  MaintenanceSnapshot,
+  DiagnosticsSnapshot,
 } from "../../shared/models";
+
+export const maintenanceState: MaintenanceSnapshot = {
+  ytDlp: {
+    currentVersion: "2026.01.01",
+    latestVersion: null,
+    available: false,
+    supported: true,
+    busy: false,
+  },
+  app: { configured: false, currentVersion: "0.1.0", latestVersion: null, status: "unconfigured" },
+  ffmpegSource: "BtbN FFmpeg Builds (GPL)",
+};
+export const diagnosticsState: DiagnosticsSnapshot = {
+  appVersion: "0.1.0",
+  electronVersion: "44.6.0",
+  nodeVersion: "24.14.0",
+  platform: "win32",
+  architecture: "x64",
+  schemaVersion: 3,
+  databasePath: "C:\\Data\\mediavault.db",
+  downloadFolder: "C:\\Videos\\MediaVault\\Downloads",
+  binaries: {
+    ytDlp: { available: true, state: "ready", version: "2026.01.01" },
+    ffmpeg: { available: true, state: "ready", version: "8.0" },
+    ffprobe: { available: true, state: "ready", version: "8.0" },
+  },
+  driveConnected: false,
+  browserSession: "persistent",
+  activeDownloads: 0,
+  activeUploads: 0,
+  availableDiskSpace: 1000000000,
+  settings: {
+    language: "en",
+    theme: "dark",
+    closeBehavior: "tray",
+    startWithWindows: false,
+    quality: "best",
+    container: "mp4",
+    downloadConcurrency: 2,
+    uploadConcurrency: 2,
+    autoUpload: false,
+    deleteLocal: "never",
+  },
+};
+
+export const storageState: StorageSnapshot = {
+  downloads: 0,
+  temp: 0,
+  thumbnails: 0,
+  database: 0,
+  logs: 0,
+  fingerprintEnabled: false,
+};
+
+export const productState: ProductSettings = {
+  closeBehavior: "tray",
+  startWithWindows: false,
+  theme: "dark",
+  firstLaunchCompleted: true,
+  startupSupported: true,
+  trayAvailable: true,
+};
 
 export const driveState: DriveSnapshot = {
   account: { connected: false, configured: false, connecting: false },
@@ -32,12 +98,31 @@ export function desktopFixture() {
   const downloadListeners = new Set<(items: DownloadJob[]) => void>();
   const libraryListeners = new Set<(items: MediaItem[]) => void>();
   const activityListeners = new Set<(items: ActivityItem[]) => void>();
+  const productListeners = new Set<(settings: ProductSettings) => void>();
+  const navigationListeners = new Set<(route: "/downloads" | "/settings" | "/") => void>();
   const driveListeners = new Set<(state: DriveSnapshot) => void>();
   const success = async () => ({ ok: true as const, value: undefined });
   const api: MediaVaultAPI = {
+    maintenance: {
+      get: async () => ({ ok: true, value: maintenanceState }),
+      checkYtDlp: async () => ({ ok: true, value: maintenanceState.ytDlp }),
+      updateYtDlp: async () => ({ ok: true, value: maintenanceState.ytDlp }),
+      checkApp: async () => ({ ok: false, error: "updateNotConfigured" }),
+      downloadApp: async () => ({ ok: false, error: "updateNotConfigured" }),
+      installApp: async () => ({ ok: false, error: "updateNotConfigured" }),
+    },
+    diagnostics: {
+      get: async () => ({ ok: true, value: diagnosticsState }),
+      logs: async () => ({ ok: true, value: [] }),
+      copyLog: success,
+      openLogs: success,
+      clearLogs: success,
+      exportDiagnostics: async () => ({ ok: true, value: false }),
+    },
     window: {
       minimize: success,
       close: success,
+      exit: success,
       maximize: async () => ({ ok: true, value: { maximized: true } }),
       getState: async () => ({ ok: true, value: { maximized: false } }),
       onState: () => () => {},
@@ -79,8 +164,37 @@ export function desktopFixture() {
       }),
       updateDownloads: async (settings) => ({ ok: true, value: settings }),
       setLanguage: success,
+      getProduct: async () => ({ ok: true, value: productState }),
+      updateProduct: async (prefs) => ({ ok: true, value: { ...productState, ...prefs } }),
+      completeFirstLaunch: async () => ({
+        ok: true,
+        value: { ...productState, firstLaunchCompleted: true },
+      }),
       getDrive: async () => ({ ok: true, value: driveState.settings }),
       updateDrive: async (settings) => ({ ok: true, value: settings }),
+    },
+    product: {
+      getVersion: async () => ({ ok: true, value: "0.1.0" }),
+      onChanged: (listener) => {
+        productListeners.add(listener);
+        return () => {
+          productListeners.delete(listener);
+        };
+      },
+      onNavigate: (listener) => {
+        navigationListeners.add(listener);
+        return () => {
+          navigationListeners.delete(listener);
+        };
+      },
+    },
+    storage: {
+      get: async () => ({ ok: true, value: storageState }),
+      clean: async () => ({ ok: true, value: storageState }),
+      setFingerprintEnabled: async (fingerprintEnabled) => ({
+        ok: true,
+        value: { ...storageState, fingerprintEnabled },
+      }),
     },
     binaries: {
       status: async () => ({ ok: true, value: { available: true, version: "2026.01.01" } }),
@@ -184,6 +298,12 @@ export function desktopFixture() {
     libraryListeners,
     activityListeners,
     driveListeners,
+    productListeners,
+    navigationListeners,
+    emitProduct: (settings: ProductSettings) =>
+      productListeners.forEach((listener) => listener(settings)),
+    emitNavigate: (route: "/downloads" | "/settings" | "/") =>
+      navigationListeners.forEach((listener) => listener(route)),
     emitDrive: (state: DriveSnapshot) => driveListeners.forEach((listener) => listener(state)),
     emitDownloads: (items: DownloadJob[]) =>
       downloadListeners.forEach((listener) => listener(items)),

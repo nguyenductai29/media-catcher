@@ -10,6 +10,8 @@ import type { SettingsService } from "../services/settings-service";
 import { createBrowserSession } from "./browser-session";
 import { MediaCandidates, classifyMedia } from "./media-detector";
 import { normalizeBrowserUrl } from "./url";
+import type { BrowserCookieBridge } from "./browser-cookie-bridge";
+import { readCookieMetadata } from "./cookie-metadata";
 
 export class BrowserManager {
   private view!: WebContentsView;
@@ -21,6 +23,7 @@ export class BrowserManager {
   private viewClosing: Promise<void> | undefined;
   private requests = new Map<number, number>();
   private analysisAbort: AbortController | undefined;
+  private analyses = new Set<Promise<void>>();
   private emitTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
   private state: BrowserState = {
@@ -40,6 +43,7 @@ export class BrowserManager {
     private window: BrowserWindow,
     private settings: SettingsService,
     private analyzer: YtDlpService,
+    private cookies?: BrowserCookieBridge,
   ) {
     this.createView();
     void this.open(settings.get().homepage).catch(() => {});
@@ -68,6 +72,17 @@ export class BrowserManager {
     this.view.setVisible(false);
     this.window.contentView.addChildView(this.view);
     const contents = this.view.webContents;
+    this.cookies?.bind({
+      cookies: this.session.cookies,
+      currentPage: () =>
+        this.disposed || contents.isDestroyed()
+          ? null
+          : { url: this.state.url, generation: this.generation, loading: this.navigationPending },
+      metadata: (url, signal) => {
+        if (contents.isDestroyed()) return Promise.reject(new Error("browserSessionRequired"));
+        return readCookieMetadata(contents.debugger, url, signal);
+      },
+    });
     const allowNavigation = (event: Electron.Event, url: string) => {
       try {
         normalizeBrowserUrl(url);
@@ -266,7 +281,13 @@ export class BrowserManager {
     this.state.loading = false;
     this.emit();
   }
-  async scan() {
+  scan(): Promise<void> {
+    const task = this.scanPage();
+    this.analyses.add(task);
+    void task.finally(() => this.analyses.delete(task)).catch(() => {});
+    return task;
+  }
+  private async scanPage() {
     if (this.state.scanning) return;
     const url = normalizeBrowserUrl(this.state.url);
     const generation = this.generation;
@@ -289,8 +310,16 @@ export class BrowserManager {
         "binaryInvalid",
         "analysisTimeout",
         "drmProtected",
+        "browserSessionRequired",
+        "networkUnavailable",
       ].includes(code)
-        ? (code as "binaryMissing" | "binaryInvalid" | "analysisTimeout" | "drmProtected")
+        ? (code as
+            | "binaryMissing"
+            | "binaryInvalid"
+            | "analysisTimeout"
+            | "drmProtected"
+            | "browserSessionRequired"
+            | "networkUnavailable")
         : "analysisFailed";
     } finally {
       if (generation === this.generation && this.analysisAbort === abort) {
@@ -366,8 +395,10 @@ export class BrowserManager {
   }
   private destroyView(): Promise<void> {
     if (this.viewClosing) return this.viewClosing;
+    const cookieDrain = this.cookies?.invalidate() ?? Promise.resolve();
     this.analysisAbort?.abort();
     this.analysisAbort = undefined;
+    const analysisDrain = Promise.allSettled([...this.analyses]);
     this.generation++;
     this.navigationPending = false;
     this.state.scanning = false;
@@ -380,16 +411,17 @@ export class BrowserManager {
     const contents = this.view.webContents;
     if (!this.window.isDestroyed()) this.window.contentView.removeChildView(this.view);
     if (contents.isDestroyed()) {
-      this.viewClosing = Promise.resolve();
+      this.viewClosing = Promise.all([cookieDrain, analysisDrain]).then(() => {});
       return this.viewClosing;
     }
-    this.viewClosing = new Promise<void>((resolve) => contents.once("destroyed", resolve));
+    const destroyed = new Promise<void>((resolve) => contents.once("destroyed", resolve));
+    this.viewClosing = Promise.all([destroyed, cookieDrain, analysisDrain]).then(() => {});
     contents.close({ waitForBeforeUnload: false });
     return this.viewClosing;
   }
-  dispose() {
+  dispose(): Promise<void> {
     this.disposed = true;
     clearTimeout(this.emitTimer);
-    void this.destroyView();
+    return Promise.all([this.destroyView(), this.cookies?.shutdown()]).then(() => {});
   }
 }

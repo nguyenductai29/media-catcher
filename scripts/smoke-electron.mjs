@@ -2,6 +2,7 @@
 // All web traffic and browser profiles used by these checks are local fixtures.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { createServer } from "node:http";
 import {
@@ -11,8 +12,10 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,6 +26,22 @@ import Database from "better-sqlite3";
 import { _electron as electron } from "playwright";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packagedIndex = process.argv.indexOf("--packaged-executable");
+const packagedExecutable = packagedIndex === -1 ? undefined : process.argv[packagedIndex + 1];
+if (packagedIndex !== -1 && (!packagedExecutable || !isAbsolute(packagedExecutable)))
+  throw new Error("--packaged-executable requires an absolute executable path.");
+if (packagedExecutable && process.argv.includes("--dev"))
+  throw new Error("Packaged smoke cannot use a development renderer.");
+const packagedResources = packagedExecutable
+  ? join(dirname(packagedExecutable), "resources")
+  : undefined;
+const expectedVersion =
+  process.env.MEDIAVAULT_EXPECTED_VERSION ||
+  JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
+const samePath = (a, b) =>
+  process.platform === "win32"
+    ? resolve(a).toLowerCase() === resolve(b).toLowerCase()
+    : resolve(a) === resolve(b);
 const dictionaries = Object.fromEntries(
   await Promise.all(
     ["en", "vi"].map(async (lang) => [
@@ -52,24 +71,44 @@ async function until(description, read, accept = Boolean, timeout = 15_000) {
   throw new Error(`Timed out: ${description}`, lastError ? { cause: lastError } : undefined);
 }
 
-for (const artifact of [
-  "dist-electron/main.cjs",
-  "dist-electron/preload.cjs",
-  "dist-desktop/index.html",
-]) {
-  await access(join(root, artifact)).catch(() => {
+for (const artifact of packagedExecutable
+  ? [
+      packagedExecutable,
+      join(packagedResources, "app.asar"),
+      ...["yt-dlp", "ffmpeg", "ffprobe"].map((name) =>
+        join(packagedResources, "bin", `${name}.exe`),
+      ),
+    ]
+  : [
+      join(root, "dist-electron/main.cjs"),
+      join(root, "dist-electron/preload.cjs"),
+      join(root, "dist-desktop/index.html"),
+    ]) {
+  await access(artifact).catch(() => {
     throw new Error(`Missing ${artifact}; build the desktop app before running this smoke test.`);
   });
 }
 
-const scratch = await mkdtemp(join(tmpdir(), "mediavault-smoke-"));
+const scratch = await mkdtemp(
+  join(tmpdir(), packagedExecutable ? "mediavault-smoke-Tiếng Việt 日本語-" : "mediavault-smoke-"),
+);
 const requests = new Map();
 const fixturePath = join(scratch, "fixture.mp4");
 const runExecutable = promisify(execFile);
 const executable = (name) =>
-  join(root, "resources", "bin", `${name}${process.platform === "win32" ? ".exe" : ""}`);
+  join(
+    packagedResources ?? join(root, "resources"),
+    "bin",
+    `${name}${process.platform === "win32" ? ".exe" : ""}`,
+  );
 let mediaSize = 0;
 const rangeRequests = [];
+const authCookieName = "mv_smoke_http_only";
+const authCookieValue = `mv-auth-${randomUUID()}`;
+const authRequests = [];
+let slowAuthMedia = false;
+const cookieDirectory = (profile = "persistent-profile") =>
+  join(scratch, profile, "browser-cookie-temp");
 async function generateFixture() {
   await runExecutable(
     executable("ffmpeg"),
@@ -143,6 +182,37 @@ const server = createServer((request, response) => {
     response.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", ...extra });
     response.end(request.method === "HEAD" ? undefined : body);
   };
+  if (url.pathname === "/login") {
+    return send(
+      "text/html; charset=utf-8",
+      "<!doctype html><title>MediaVault signed-in fixture</title><h1>Signed in</h1>",
+      {
+        "Set-Cookie": `${authCookieName}=${authCookieValue}; HttpOnly; Path=/; SameSite=Lax`,
+      },
+    );
+  }
+  if (["/protected-video", "/protected.mp4"].includes(url.pathname)) {
+    const authorized = (request.headers.cookie ?? "")
+      .split(";")
+      .some((cookie) => cookie.trim() === `${authCookieName}=${authCookieValue}`);
+    // Record only a boolean, never cookie/header values.
+    authRequests.push({ path: url.pathname, authorized });
+    if (!authorized) {
+      response.writeHead(401, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      response.end(
+        request.method === "HEAD" ? undefined : "<!doctype html><title>Sign in required</title>",
+      );
+      return;
+    }
+    if (url.pathname === "/protected-video")
+      return send(
+        "text/html; charset=utf-8",
+        '<!doctype html><title>MediaVault protected fixture</title><h1>Protected local video</h1><video controls preload="none"><source src="/protected.mp4" type="video/mp4"></video>',
+      );
+  }
   if (/^\/hls\/(?:index\.m3u8|segment-\d{2}\.ts)$/.test(url.pathname)) {
     const path = join(scratch, ...url.pathname.slice(1).split("/"));
     void stat(path)
@@ -168,7 +238,7 @@ const server = createServer((request, response) => {
       });
     return;
   }
-  if (["/clip.mp4", "/slow.mp4"].includes(url.pathname)) {
+  if (["/clip.mp4", "/slow.mp4", "/protected.mp4"].includes(url.pathname)) {
     const match = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
     const start = match ? Number(match[1]) : 0;
     const end = match?.[2] ? Math.min(Number(match[2]), mediaSize - 1) : mediaSize - 1;
@@ -192,7 +262,8 @@ const server = createServer((request, response) => {
     const source = createReadStream(fixturePath, { start, end, highWaterMark: 4096 });
     response.on("close", () => source.destroy());
     source.on("error", () => response.destroy());
-    if (url.pathname === "/clip.mp4") source.pipe(response);
+    if (url.pathname === "/clip.mp4" || (url.pathname === "/protected.mp4" && !slowAuthMedia))
+      source.pipe(response);
     else
       void (async () => {
         try {
@@ -245,21 +316,24 @@ let page;
 let devServer;
 const rendererErrors = [];
 let analysisResult = "binary unavailable; classified error verified";
+let applicationPath = root;
+let savedPackagedRuntime = false;
 
-async function launch(profile, binaryPath) {
+async function launch(profile, binaryPath, { fresh = false } = {}) {
   const profilePath = join(scratch, profile);
   await mkdir(profilePath, { recursive: true });
-  await writeFile(
-    join(profilePath, "browser-settings.json"),
-    JSON.stringify({
-      version: 1,
-      homepage: `${origin}/home`,
-      saveSession: true,
-    }),
-    { flag: "wx" },
-  ).catch((error) => {
-    if (error.code !== "EEXIST") throw error;
-  });
+  if (!fresh)
+    await writeFile(
+      join(profilePath, "browser-settings.json"),
+      JSON.stringify({
+        version: 1,
+        homepage: `${origin}/home`,
+        saveSession: true,
+      }),
+      { flag: "wx" },
+    ).catch((error) => {
+      if (error.code !== "EEXIST") throw error;
+    });
   const env = {
     ...process.env,
     MEDIAVAULT_USER_DATA: profilePath,
@@ -267,12 +341,31 @@ async function launch(profile, binaryPath) {
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.MEDIAVAULT_DEV_URL;
+  for (const name of ["MEDIAVAULT_YTDLP_PATH", "MEDIAVAULT_FFMPEG_PATH", "MEDIAVAULT_FFPROBE_PATH"])
+    delete env[name];
   // Normal smoke must never authorize Google, even in a developer's configured shell.
   delete env.GOOGLE_CLIENT_ID;
   delete env.GOOGLE_CLIENT_SECRET;
   if (devServer) env.MEDIAVAULT_DEV_URL = "http://127.0.0.1:5174";
   if (binaryPath !== undefined) env.MEDIAVAULT_YTDLP_PATH = binaryPath;
-  app = await electron.launch({ args: ["."], cwd: root, env, timeout: 30_000 });
+  const args = ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"];
+  if (packagedExecutable) {
+    delete env.MEDIAVAULT_USER_DATA;
+    delete env.MEDIAVAULT_VIDEOS_DIR;
+    delete env.NODE_PATH;
+    delete env.NODE_OPTIONS;
+    const windowsDirectory = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
+    for (const name of Object.keys(env)) if (name.toLowerCase() === "path") delete env[name];
+    env.PATH = `${join(windowsDirectory, "System32")};${windowsDirectory}`;
+    args.push(`--user-data-dir=${profilePath}`, `--media-videos-dir=${join(scratch, "videos")}`);
+  } else args.unshift(".");
+  app = await electron.launch({
+    ...(packagedExecutable ? { executablePath: packagedExecutable } : {}),
+    args,
+    cwd: packagedExecutable ? dirname(packagedExecutable) : root,
+    env,
+    timeout: 30_000,
+  });
   // Playwright also reports WebContentsView pages; their creation order is not stable.
   const rendererOrigin = devServer ? "http://127.0.0.1:5174/" : "mediavault://app/";
   page = await until(
@@ -284,7 +377,93 @@ async function launch(profile, binaryPath) {
   page.setDefaultTimeout(15_000);
   page.on("pageerror", (error) => rendererErrors.push(error.message));
   await page.waitForFunction(() => Boolean(window.mediaVault?.browser));
-  await page.getByRole("button", { name: "en", exact: true }).click();
+  if (packagedExecutable) {
+    const runtime = await app.evaluate(({ app }) => {
+      const load = process
+        .getBuiltinModule("module")
+        .createRequire(process.getBuiltinModule("path").join(app.getAppPath(), "package.json"));
+      // Import the actual staged maintenance dependencies without creating a provider
+      // or contacting a release server. Development node_modules must not fill gaps.
+      const updater = load("electron-updater");
+      const provider = load("electron-updater/out/providers/GitHubProvider.js");
+      return {
+        isPackaged: app.isPackaged,
+        version: app.getVersion(),
+        appPath: app.getAppPath(),
+        userData: app.getPath("userData"),
+        videos: app.getPath("videos"),
+        resourcesPath: process.resourcesPath,
+        executable: process.execPath,
+        platform: process.platform,
+        architecture: process.arch,
+        electron: process.versions.electron,
+        node: process.versions.node,
+        nativeModules: Object.keys(load.cache).filter((path) =>
+          /better-sqlite3[\\/].*\.node$/i.test(path),
+        ),
+        updaterRuntime: {
+          version: load("electron-updater/package.json").version,
+          nsis: typeof updater.NsisUpdater === "function",
+          github: typeof provider.GitHubProvider === "function",
+          module: load.resolve("electron-updater"),
+        },
+      };
+    });
+    assert.equal(runtime.isPackaged, true, "test did not launch a packaged application");
+    assert.equal(runtime.version, expectedVersion);
+    assert.equal(runtime.architecture, "x64");
+    assert.equal(runtime.updaterRuntime.nsis, true);
+    assert.equal(runtime.updaterRuntime.github, true);
+    assert.equal(runtime.updaterRuntime.version, "6.8.9");
+    assert.ok(
+      runtime.updaterRuntime.module.startsWith(runtime.appPath + sep),
+      "app updater loaded outside packaged resources",
+    );
+    assert.ok(samePath(runtime.executable, packagedExecutable));
+    assert.ok(
+      samePath(runtime.userData, profilePath),
+      "packaged app ignored the isolated profile argument",
+    );
+    assert.ok(
+      samePath(runtime.videos, join(scratch, "videos")),
+      "packaged app ignored the isolated media-directory argument",
+    );
+    assert.ok(samePath(runtime.resourcesPath, packagedResources));
+    assert.ok(
+      runtime.nativeModules.length > 0,
+      "packaged better-sqlite3 native module did not load",
+    );
+    for (const nativePath of runtime.nativeModules) {
+      const local = relative(runtime.resourcesPath, nativePath);
+      assert.ok(
+        local && !isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`),
+        "native module loaded outside packaged resources",
+      );
+    }
+    applicationPath = runtime.appPath;
+    const configuredDownloads = await value("settings", "getDownloads");
+    assert.ok(
+      insideScratch(configuredDownloads.directory),
+      "packaged app uses a download directory outside the isolated fixture",
+    );
+    if (!savedPackagedRuntime && process.env.MEDIAVAULT_SMOKE_ARTIFACTS) {
+      await mkdir(resolve(process.env.MEDIAVAULT_SMOKE_ARTIFACTS), { recursive: true });
+      await writeFile(
+        join(resolve(process.env.MEDIAVAULT_SMOKE_ARTIFACTS), "packaged-runtime.json"),
+        JSON.stringify(runtime, null, 2),
+      );
+      savedPackagedRuntime = true;
+      console.log(
+        "[desktop smoke] Packaged executable, isolated Unicode data path, bundled native SQLite module and restricted system PATH verified.",
+      );
+    }
+  }
+  if (!fresh) await page.getByRole("button", { name: "en", exact: true }).click();
+  else await value("settings", "update", { homepage: `${origin}/home`, saveSession: true });
+}
+function insideScratch(path) {
+  const local = relative(scratch, path);
+  return !isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`);
 }
 async function bridge(group, method, ...args) {
   return page.evaluate(
@@ -450,9 +629,14 @@ async function loaded(path) {
   );
 }
 async function navigate(path) {
-  await page
-    .getByRole("textbox", { name: label("desktop.address"), exact: true })
-    .fill(`${origin}${path}`);
+  const address = page.getByRole("textbox", { name: label("desktop.address"), exact: true });
+  const current = await state();
+  await until(
+    "browser address hydrated before navigation",
+    () => address.inputValue(),
+    (url) => url === current.url,
+  );
+  await address.fill(`${origin}${path}`);
   await page.getByRole("button", { name: label("browser.go"), exact: true }).click();
   return loaded(path);
 }
@@ -518,6 +702,105 @@ async function assertBounds() {
       ["x", "y", "width", "height"].every((key) => Math.abs(native.bounds[key] - slot[key]) <= 2),
   );
 }
+async function firstRunSmoke() {
+  await launch("onboarding-profile", undefined, { fresh: true });
+  const welcome = () => page.getByRole("dialog", { name: label("onboarding.title"), exact: true });
+  await welcome().waitFor();
+  await until(
+    "onboarding hides the native browser view",
+    geometry,
+    (view) =>
+      !view.attached || !view.visible || view.bounds.width === 0 || view.bounds.height === 0,
+  );
+  const initial = await value("settings", "getProduct");
+  assert.equal(initial.firstLaunchCompleted, false);
+  assert.equal(initial.startWithWindows, false, "fresh launch must not register Windows startup");
+  assert.equal(initial.closeBehavior, "tray");
+  assert.equal(initial.trayAvailable, true);
+  if (process.env.MEDIAVAULT_SMOKE_ARTIFACTS) {
+    const destination = resolve(process.env.MEDIAVAULT_SMOKE_ARTIFACTS);
+    await mkdir(destination, { recursive: true });
+    await page.screenshot({ path: join(destination, "desktop-onboarding.png") });
+  }
+  // An interrupted wizard must remain unfinished even after ordinary settings exist.
+  await close();
+  await launch("onboarding-profile", undefined, { fresh: true });
+  await welcome().waitFor();
+  assert.equal((await value("settings", "getProduct")).firstLaunchCompleted, false);
+  await welcome().getByRole("button", { name: "Tiếng Việt", exact: true }).click();
+  const vietnamese = page.getByRole("dialog", {
+    name: label("onboarding.title", "vi"),
+    exact: true,
+  });
+  await vietnamese.waitFor();
+  await vietnamese.getByRole("button", { name: "English", exact: true }).click();
+  await welcome()
+    .getByRole("button", { name: label("onboarding.next"), exact: true })
+    .click();
+  await welcome().getByText(label("onboarding.steps.folder"), { exact: true }).waitFor();
+  const directory = join(scratch, "onboarding-downloads");
+  await mkdir(directory, { recursive: true });
+  await picker([directory]);
+  await welcome()
+    .getByRole("button", { name: label("common.browse"), exact: true })
+    .click();
+  await welcome().getByText(directory, { exact: true }).waitFor();
+  await welcome()
+    .getByRole("button", { name: label("onboarding.next"), exact: true })
+    .click();
+  await welcome()
+    .getByRole("button", { name: label("downloadDialog.quality.1080"), exact: true })
+    .click();
+  await welcome()
+    .getByRole("button", { name: label("onboarding.next"), exact: true })
+    .click();
+  await welcome()
+    .getByRole("button", { name: label("downloadDialog.container.mkv"), exact: true })
+    .click();
+  await welcome()
+    .getByRole("button", { name: label("onboarding.next"), exact: true })
+    .click();
+  assert.equal(
+    await welcome()
+      .getByRole("button", { name: label("drive.connect"), exact: true })
+      .isDisabled(),
+    true,
+  );
+  await welcome()
+    .getByRole("button", { name: label("onboarding.skip"), exact: true })
+    .click();
+  assert.equal(
+    await welcome()
+      .getByRole("switch", { name: label("settings.startWin"), exact: true })
+      .getAttribute("aria-checked"),
+    "false",
+  );
+  await welcome()
+    .getByRole("button", { name: label("product.close.tray"), exact: true })
+    .click();
+  await welcome()
+    .getByRole("button", { name: label("onboarding.finish"), exact: true })
+    .click();
+  await welcome().waitFor({ state: "hidden" });
+  const completed = await value("settings", "getProduct");
+  assert.equal(completed.firstLaunchCompleted, true);
+  assert.equal(completed.startWithWindows, false);
+  assert.equal(completed.closeBehavior, "tray");
+  const downloads = await value("settings", "getDownloads");
+  assert.equal(downloads.directory, directory);
+  assert.equal(downloads.quality, "1080");
+  assert.equal(downloads.container, "mkv");
+  assert.equal((await value("drive", "getAccount")).connected, false);
+  await close();
+  await launch("onboarding-profile");
+  assert.equal((await value("settings", "getProduct")).firstLaunchCompleted, true);
+  assert.equal((await value("settings", "getDownloads")).directory, directory);
+  assert.equal(await welcome().count(), 0, "completed wizard reopened after restart");
+  await close();
+  console.log(
+    "[desktop smoke] Fresh/interrupted/completed onboarding, real folder approval, quality/format persistence, optional Drive and startup-off verified.",
+  );
+}
 async function close() {
   if (!app) return;
   const closing = app;
@@ -528,9 +811,17 @@ async function close() {
       dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
     })
     .catch(() => {});
+  const exited = closing.waitForEvent("close", { timeout: 30_000 });
+  if (page && !page.isClosed())
+    await page
+      .evaluate(() => {
+        void window.mediaVault.window.exit();
+      })
+      .catch(() => {});
+  else await closing.evaluate(({ app }) => app.quit()).catch(() => {});
+  await exited;
   app = undefined;
   page = undefined;
-  await closing.close();
 }
 async function verifyAnalysisError(binaryPath, expected, profile) {
   await launch(profile, binaryPath);
@@ -599,6 +890,576 @@ async function picker(paths) {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths });
   }, paths);
 }
+async function assertCookieFilesRemoved() {
+  assert.equal(
+    (await readdir(cookieDirectory())).length,
+    0,
+    "temporary browser cookie files survived an operation",
+  );
+}
+function assertNoCookieMaterial(value, boundary) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  assert.equal(text.includes(authCookieValue), false, `${boundary} exposed a cookie value`);
+  assert.equal(text.includes(authCookieName), false, `${boundary} exposed cookie material`);
+  assert.equal(
+    text.includes("browser-cookie-temp"),
+    false,
+    `${boundary} exposed the cookie directory`,
+  );
+  assert.equal(
+    /cookie-[a-f0-9-]{36}\.txt/i.test(text),
+    false,
+    `${boundary} exposed a temporary cookie filename`,
+  );
+}
+async function verifyCookiePrivacy() {
+  for (const [name, data] of [
+    ["Browser DTO", await state()],
+    ["Download DTO", await jobs()],
+    ["Library DTO", await value("library", "list")],
+    ["Activity DTO", await value("activity", "list")],
+  ])
+    assertNoCookieMaterial(data, name);
+  const profile = join(scratch, "persistent-profile");
+  const database = new Database(join(profile, "mediavault.db"), { readonly: true });
+  try {
+    for (const { name } of database
+      .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all()) {
+      const escaped = name.replaceAll('"', '""');
+      assertNoCookieMaterial(database.prepare(`SELECT * FROM "${escaped}"`).all(), "SQLite rows");
+    }
+  } finally {
+    database.close();
+  }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const data = await readFile(join(profile, `mediavault.db${suffix}`)).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (data) assertNoCookieMaterial(data.toString("utf8"), "SQLite files");
+  }
+  const logs = join(profile, "logs");
+  for (const entry of await readdir(logs, { withFileTypes: true }))
+    if (entry.isFile())
+      assertNoCookieMaterial(await readFile(join(logs, entry.name), "utf8"), "Application logs");
+}
+async function storageSmoke() {
+  const snapshot = await value("storage", "get");
+  assert.deepEqual(Object.keys(snapshot).sort(), [
+    "database",
+    "downloads",
+    "fingerprintEnabled",
+    "logs",
+    "temp",
+    "thumbnails",
+  ]);
+  for (const category of ["downloads", "temp", "thumbnails", "database", "logs"])
+    assert.ok(
+      Number.isFinite(snapshot[category]) && snapshot[category] >= 0,
+      `Invalid ${category} byte count`,
+    );
+  assert.ok(snapshot.database > 0, "storage omitted the real database files");
+  assert.equal(snapshot.fingerprintEnabled, false);
+  assert.equal((await value("storage", "setFingerprintEnabled", true)).fingerprintEnabled, true);
+  assert.equal((await value("storage", "get")).fingerprintEnabled, true);
+  const database = new Database(join(scratch, "persistent-profile", "mediavault.db"), {
+    readonly: true,
+  });
+  try {
+    const row = database.prepare("SELECT value_json FROM settings WHERE key=?").get("storage");
+    assert.equal(JSON.parse(row.value_json).fingerprintEnabled, true);
+  } finally {
+    database.close();
+  }
+  assert.equal((await value("storage", "setFingerprintEnabled", false)).fingerprintEnabled, false);
+  for (const [method, input] of [
+    ["clean", "downloads"],
+    ["setFingerprintEnabled", "true"],
+  ])
+    assert.deepEqual(await bridge("storage", method, input), { ok: false, error: "invalidInput" });
+
+  const tempRoot = join(scratch, "videos", "MediaVault", "Temp");
+  const orphan = join(tempRoot, randomUUID());
+  const partial = join(orphan, "media.mp4.part");
+  const sentinel = join(tempRoot, "smoke-sentinel.txt");
+  await mkdir(orphan, { recursive: true });
+  await writeFile(partial, "generated orphan fixture");
+  await writeFile(sentinel, "preserve non-owned fixture");
+  const old = new Date(Date.now() - 2 * 86_400_000);
+  await utimes(partial, old, old);
+  await utimes(orphan, old, old);
+  const cleaned = await value("storage", "clean", "staleTemp");
+  assert.ok(cleaned.database > 0);
+  await assert.rejects(
+    access(orphan),
+    (error) => error.code === "ENOENT",
+    "stale orphan staging survived cleanup",
+  );
+  assert.equal(await readFile(sentinel, "utf8"), "preserve non-owned fixture");
+  console.log(
+    "[desktop smoke] Real storage byte counts, persisted fingerprint preference, strict controls and safe orphan cleanup verified.",
+  );
+}
+
+async function diagnosticsSmoke() {
+  await page.getByRole("link", { name: label("nav.settings"), exact: true }).click();
+  const diagnostics = page.locator("section").filter({
+    has: page.getByRole("heading", { name: label("diagnostics.title"), exact: true }),
+  });
+  await diagnostics
+    .getByRole("button", { name: label("diagnostics.refresh"), exact: true })
+    .waitFor();
+  const maintenance = await value("maintenance", "get");
+  const binaries = await value("binaries", "getStatus");
+  const notices = JSON.parse(await readFile(join(root, "resources/notices/binaries.json"), "utf8"));
+  assert.equal(maintenance.ytDlp.currentVersion, binaries.ytDlp.version);
+  assert.equal(
+    maintenance.ytDlp.latestVersion,
+    null,
+    "startup unexpectedly checked yt-dlp updates",
+  );
+  assert.equal(maintenance.ytDlp.available, false);
+  assert.equal(
+    maintenance.ffmpegSource,
+    notices.binaries.find((binary) => binary.file === "ffmpeg.exe").buildSourceUrl,
+  );
+  await until(
+    "Settings displays the current yt-dlp version",
+    () =>
+      page.getByText(label("maintenance.ytCurrent"), { exact: true }).locator("..").textContent(),
+    (text) => text.includes(binaries.ytDlp.version),
+  );
+  await page.getByText(maintenance.ffmpegSource, { exact: true }).waitFor();
+  assert.deepEqual(maintenance.app, {
+    configured: false,
+    currentVersion: expectedVersion,
+    latestVersion: null,
+    status: "unconfigured",
+  });
+  await page.getByText(label("maintenance.appStatus.unconfigured"), { exact: true }).waitFor();
+  for (const [method, key] of [
+    ["checkApp", "maintenance.checkApp"],
+    ["downloadApp", "maintenance.downloadApp"],
+    ["installApp", "maintenance.installApp"],
+  ]) {
+    assert.equal(
+      await page.getByRole("button", { name: label(key), exact: true }).isDisabled(),
+      true,
+    );
+    assert.deepEqual(await bridge("maintenance", method), {
+      ok: false,
+      error: "updateNotConfigured",
+    });
+  }
+  assert.deepEqual((await value("maintenance", "get")).app, maintenance.app);
+  assert.equal(
+    await page.getByText(label("maintenance.appStatus.current"), { exact: true }).count(),
+    0,
+  );
+
+  const snapshot = await value("diagnostics", "get");
+  const runtime = await app.evaluate(({ app }) => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    architecture: process.arch,
+    electron: process.versions.electron,
+    node: process.versions.node,
+  }));
+  assert.equal(snapshot.appVersion, runtime.version);
+  assert.equal(snapshot.electronVersion, runtime.electron);
+  assert.equal(snapshot.nodeVersion, runtime.node);
+  assert.equal(snapshot.platform, runtime.platform);
+  assert.equal(snapshot.architecture, runtime.architecture);
+  assert.deepEqual(snapshot.binaries, binaries);
+  assert.equal(snapshot.driveConnected, false);
+  assert.equal(
+    snapshot.browserSession,
+    (await value("settings", "get")).saveSession ? "persistent" : "temporary",
+  );
+  assert.equal(
+    snapshot.activeDownloads,
+    (await jobs()).filter((job) =>
+      ["queued", "analyzing", "downloading", "processing"].includes(job.status),
+    ).length,
+  );
+  assert.equal(
+    snapshot.activeUploads,
+    (await value("drive", "getState")).uploads.filter((job) =>
+      ["queued", "preparing", "uploading", "finalizing"].includes(job.status),
+    ).length,
+  );
+  assert.ok(Number.isSafeInteger(snapshot.availableDiskSpace) && snapshot.availableDiskSpace >= 0);
+  assert.ok(samePath(snapshot.databasePath, join(scratch, "persistent-profile", "mediavault.db")));
+  assert.ok(samePath(snapshot.downloadFolder, (await value("settings", "getDownloads")).directory));
+  const database = new Database(snapshot.databasePath, { readonly: true });
+  try {
+    assert.equal(snapshot.schemaVersion, database.pragma("user_version", { simple: true }));
+  } finally {
+    database.close();
+  }
+  assertNoCookieMaterial(snapshot, "Diagnostic snapshot");
+  await until(
+    "Settings renders actual diagnostic platform",
+    () =>
+      diagnostics
+        .getByText(label("diagnostics.fields.platform"), { exact: true })
+        .locator("..")
+        .locator("dd")
+        .textContent(),
+    (text) => text === runtime.platform,
+  );
+
+  // An invalid input exercises the real IPC logger without writing raw sentinels to a log fixture.
+  const sentinel = `diagnostic-private-${randomUUID()}`;
+  assert.deepEqual(await bridge("diagnostics", "logs", { component: sentinel }), {
+    ok: false,
+    error: "invalidInput",
+  });
+  const errors = await value("diagnostics", "logs", { component: "ipc", kind: "error" });
+  assert.ok(errors.some((entry) => entry.code === "invalidInput"));
+  assert.ok(
+    errors.every((entry) => entry.component === "ipc" && entry.code && entry.event === null),
+  );
+  const events = await value("diagnostics", "logs", { component: "browser", kind: "event" });
+  assert.ok(events.some((entry) => entry.event === "authAnalysisRetry"));
+  assert.ok(
+    events.every((entry) => entry.component === "browser" && entry.event && entry.code === null),
+  );
+  const allLogs = await value("diagnostics", "logs");
+  assert.ok(allLogs.length > 0 && allLogs.length <= 200);
+  for (const entry of allLogs) {
+    assert.deepEqual(Object.keys(entry).sort(), ["code", "component", "event", "id", "time"]);
+    assert.match(entry.id, /^[a-f0-9]{64}$/);
+  }
+  assertNoCookieMaterial(allLogs, "Diagnostic logs");
+  assert.equal(JSON.stringify(allLogs).includes(sentinel), false);
+  for (const entry of await readdir(join(scratch, "persistent-profile", "logs"), {
+    withFileTypes: true,
+  }))
+    if (entry.isFile())
+      assert.equal(
+        (await readFile(join(scratch, "persistent-profile", "logs", entry.name), "utf8")).includes(
+          sentinel,
+        ),
+        false,
+        "IPC input was written verbatim to a log",
+      );
+
+  const exportDirectory = join(scratch, "diagnostic-exports");
+  await mkdir(exportDirectory);
+  const exportPath = join(exportDirectory, "MediaVault-diagnostics.json");
+  // Intercept only the native clipboard write; the real renderer/IPC sanitizer still supplies it.
+  // Existing user clipboard formats remain untouched.
+  await app.evaluate(({ clipboard, dialog }) => {
+    globalThis.__mvDiagnosticsSmoke = {
+      writeClipboard: clipboard.writeText,
+      copiedText: null,
+      saveDialog: dialog.showSaveDialog,
+      exportPath: null,
+      chooserCalls: [],
+    };
+    clipboard.writeText = (text) => {
+      globalThis.__mvDiagnosticsSmoke.copiedText = text;
+    };
+    dialog.showSaveDialog = async (_window, options) => {
+      const fixture = globalThis.__mvDiagnosticsSmoke;
+      fixture.chooserCalls.push({ title: options.title, filters: options.filters });
+      return fixture.exportPath === null
+        ? { canceled: true }
+        : { canceled: false, filePath: fixture.exportPath };
+    };
+  });
+  try {
+    await diagnostics
+      .getByRole("combobox", { name: label("diagnostics.component"), exact: true })
+      .selectOption("ipc");
+    await diagnostics
+      .getByRole("combobox", { name: label("diagnostics.kind"), exact: true })
+      .selectOption("error");
+    const radios = diagnostics.getByRole("radio");
+    await until(
+      "filtered diagnostic rows",
+      () => radios.count(),
+      (count) => count > 0,
+    );
+    await radios.first().check();
+    await diagnostics.getByRole("button", { name: label("diagnostics.copy"), exact: true }).click();
+    await diagnostics.getByText(label("diagnostics.copied"), { exact: true }).waitFor();
+    const copied = JSON.parse(await app.evaluate(() => globalThis.__mvDiagnosticsSmoke.copiedText));
+    assert.ok(errors.some((entry) => entry.id === copied.id));
+    assert.deepEqual(Object.keys(copied).sort(), ["code", "component", "event", "id", "time"]);
+    assertNoCookieMaterial(copied, "Copied diagnostic entry");
+    assert.equal(JSON.stringify(copied).includes(sentinel), false);
+
+    assert.equal(
+      await value("diagnostics", "exportDiagnostics"),
+      false,
+      "cancelled native save picker reported success",
+    );
+    await diagnostics
+      .getByRole("button", { name: label("diagnostics.exportTitle"), exact: true })
+      .click();
+    await until(
+      "cancelled export reaches the native chooser",
+      () => app.evaluate(() => globalThis.__mvDiagnosticsSmoke.chooserCalls.length),
+      (count) => count === 2,
+    );
+    await until("cancelled export action settles", () =>
+      diagnostics
+        .getByRole("button", { name: label("diagnostics.exportTitle"), exact: true })
+        .isEnabled(),
+    );
+    assert.equal(
+      await diagnostics.getByText(label("diagnostics.exported"), { exact: true }).count(),
+      0,
+    );
+    assert.deepEqual(await readdir(exportDirectory), []);
+
+    await app.evaluate((_electron, path) => {
+      globalThis.__mvDiagnosticsSmoke.exportPath = path;
+    }, exportPath);
+    await diagnostics
+      .getByRole("button", { name: label("diagnostics.exportTitle"), exact: true })
+      .click();
+    await diagnostics.getByText(label("diagnostics.exported"), { exact: true }).waitFor();
+    const exportedText = await readFile(exportPath, "utf8");
+    const exported = JSON.parse(exportedText);
+    assert.deepEqual(Object.keys(exported).sort(), [
+      "activeDownloads",
+      "activeUploads",
+      "appVersion",
+      "architecture",
+      "availableDiskSpace",
+      "binaries",
+      "browserSession",
+      "createdAt",
+      "driveConnected",
+      "electronVersion",
+      "formatVersion",
+      "jobStatuses",
+      "logs",
+      "nodeVersion",
+      "platform",
+      "schemaVersion",
+      "settings",
+    ]);
+    assert.equal(exported.formatVersion, 1);
+    assert.equal(exported.appVersion, expectedVersion);
+    assert.equal(exported.schemaVersion, snapshot.schemaVersion);
+    const countStates = (rows, states) =>
+      Object.fromEntries(
+        states.map((status) => [status, rows.filter((row) => row.status === status).length]),
+      );
+    assert.deepEqual(exported.jobStatuses, {
+      downloads: countStates(await jobs(), [
+        "queued",
+        "analyzing",
+        "downloading",
+        "processing",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ]),
+      uploads: countStates((await value("drive", "getState")).uploads, [
+        "queued",
+        "preparing",
+        "uploading",
+        "finalizing",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ]),
+    });
+    assert.deepEqual(exported.binaries, binaries);
+    assert.deepEqual(exported.settings, snapshot.settings);
+    assert.ok(exported.logs.length > 0);
+    assertNoCookieMaterial(exportedText, "Exported diagnostics");
+    for (const privateValue of [
+      sentinel,
+      scratch,
+      snapshot.databasePath,
+      snapshot.downloadFolder,
+      exportPath,
+    ])
+      assert.equal(
+        exportedText.includes(privateValue) ||
+          exportedText.includes(JSON.stringify(privateValue).slice(1, -1)),
+        false,
+        "diagnostic export exposed private input or a local path",
+      );
+    assert.doesNotMatch(
+      exportedText,
+      /ya29\.|Bearer\s|access_token|refresh_token|client_secret|sessionEncrypted|plannedFileId|sessionUrl/i,
+    );
+    const chooserCalls = await app.evaluate(() => globalThis.__mvDiagnosticsSmoke.chooserCalls);
+    assert.ok(chooserCalls.length >= 3);
+    assert.ok(
+      chooserCalls.every(
+        (call) =>
+          call.title === label("diagnostics.exportTitle") &&
+          call.filters.some((filter) => filter.extensions.includes("json")),
+      ),
+    );
+
+    if (process.env.MEDIAVAULT_SMOKE_ARTIFACTS) {
+      const destination = resolve(process.env.MEDIAVAULT_SMOKE_ARTIFACTS);
+      await diagnostics.screenshot({ path: join(destination, "desktop-diagnostics.png") });
+      await page
+        .locator("section")
+        .filter({
+          has: page.getByRole("heading", { name: label("maintenance.appTitle"), exact: true }),
+        })
+        .screenshot({ path: join(destination, "desktop-app-updates.png") });
+    }
+
+    await diagnostics
+      .getByRole("button", { name: label("diagnostics.clear"), exact: true })
+      .click();
+    await diagnostics.getByText(label("diagnostics.cleared"), { exact: true }).waitFor();
+    assert.deepEqual(await value("diagnostics", "logs"), []);
+    assert.equal(await radios.count(), 0);
+    assert.equal(
+      await diagnostics
+        .getByRole("button", { name: label("diagnostics.copy"), exact: true })
+        .isDisabled(),
+      true,
+    );
+  } finally {
+    await app.evaluate(({ clipboard, dialog }) => {
+      const fixture = globalThis.__mvDiagnosticsSmoke;
+      dialog.showSaveDialog = fixture.saveDialog;
+      clipboard.writeText = fixture.writeClipboard;
+      delete globalThis.__mvDiagnosticsSmoke;
+    });
+    await value("diagnostics", "clearLogs");
+  }
+  await verifyCookiePrivacy();
+  await page.getByRole("link", { name: label("nav.browser"), exact: true }).click();
+  console.log(
+    "[desktop smoke] Real maintenance versions/source, unconfigured updater errors, diagnostic OS/schema/counts, safe log filtering/copy/clear and cancelled/successful private-free native JSON export verified.",
+  );
+}
+async function authenticatedDownloadSmoke() {
+  await navigate("/login");
+  assert.equal(
+    await remote(`document.cookie.includes('${authCookieName}=')`),
+    false,
+    "HttpOnly fixture cookie was readable by the website",
+  );
+  // No test-owned CDP attachment may overlap Main's short cookie-metadata attachment.
+  assert.equal(
+    await app.evaluate(
+      ({ webContents }, origin) =>
+        webContents
+          .getAllWebContents()
+          .find((item) => item.getURL().startsWith(origin))
+          .debugger.isAttached(),
+      origin,
+    ),
+    false,
+  );
+  const requestStart = authRequests.length;
+  const candidate = await scanFixture("/protected-video");
+  assert.equal(
+    candidate.requiresBrowserSession,
+    true,
+    "authenticated analysis did not mark its trusted media candidate",
+  );
+  const scanRequests = authRequests
+    .slice(requestStart)
+    .filter((request) => request.path === "/protected-video");
+  assert.ok(
+    scanRequests.some((request) => !request.authorized),
+    "analysis did not attempt the public page before auth fallback",
+  );
+  assert.ok(
+    scanRequests.some((request) => request.authorized),
+    "analysis never used the browser session",
+  );
+  await assertCookieFilesRemoved();
+  const first = await addFixture(candidate, "Smoke authenticated download");
+  assert.equal(
+    first.requiresBrowserSession,
+    true,
+    "persisted download lost its session requirement",
+  );
+  const completed = await jobState(first.id, "completed");
+  assert.ok((await stat(completed.outputPath)).size > 0);
+  assert.ok(
+    authRequests.some((request) => request.path === "/protected.mp4" && request.authorized),
+  );
+  await assertCookieFilesRemoved();
+  const log = join(scratch, "persistent-profile", "logs", "mediavault.log");
+  await until(
+    "sanitized authenticated-operation events",
+    () => readFile(log, "utf8"),
+    (text) => text.includes('"authAnalysisRetry"') && text.includes('"authDownloadUsed"'),
+  );
+  await verifyCookiePrivacy();
+
+  // Pause a real transfer, clear only the browser session, and resume the persisted job.
+  // It must stop safely instead of downloading anonymously or discarding partial bytes.
+  slowAuthMedia = true;
+  const interrupted = await addFixture(candidate, "Smoke authenticated resume");
+  await until(
+    "authenticated download progress",
+    async () => (await jobs()).find((job) => job.id === interrupted.id),
+    (job) => job.status === "downloading" && job.downloadedBytes >= 8192,
+    60_000,
+  );
+  assert.ok(
+    (await readdir(cookieDirectory())).some((name) => /^cookie-[a-f0-9-]{36}\.txt$/.test(name)),
+    "active authenticated download had no isolated cookie file",
+  );
+  await verifyCookiePrivacy();
+  await value("downloads", "pause", interrupted.id);
+  const paused = await jobState(interrupted.id, "paused");
+  await assertCookieFilesRemoved();
+  await value("settings", "clearCookies");
+  await loaded("/home");
+  await value("downloads", "resume", interrupted.id);
+  const needsSession = await until(
+    "session-dependent download safely pauses after cookie clearing",
+    async () => (await jobs()).find((job) => job.id === interrupted.id),
+    (job) => job.status === "paused" && job.error === "browserSessionRequired",
+    30_000,
+  );
+  assert.equal(needsSession.requiresBrowserSession, true);
+  assert.ok(
+    needsSession.downloadedBytes >= paused.downloadedBytes,
+    "session clearing discarded persisted partial progress",
+  );
+  assert.equal(needsSession.outputPath, undefined);
+  await assertCookieFilesRemoved();
+  await navigate("/login");
+  await value("downloads", "resume", interrupted.id);
+  await jobState(interrupted.id, "completed");
+  slowAuthMedia = false;
+  await assertCookieFilesRemoved();
+  await verifyCookiePrivacy();
+  const database = new Database(join(scratch, "persistent-profile", "mediavault.db"), {
+    readonly: true,
+  });
+  try {
+    const row = database
+      .prepare("SELECT requires_browser_session, status FROM downloads WHERE id = ?")
+      .get(interrupted.id);
+    assert.equal(row.requires_browser_session, 1);
+    assert.equal(row.status, "completed");
+  } finally {
+    database.close();
+  }
+  await value("downloads", "clearCompleted");
+  assert.deepEqual(await jobs(), []);
+  await navigate("/home");
+  console.log(
+    "[desktop smoke] Local HttpOnly login, real public-to-auth analysis retry, authenticated download, cookie-jar cleanup/privacy, safe session-loss pause and reauthentication resume verified.",
+  );
+}
+
 async function phaseTwoSmoke() {
   const binaries = await value("binaries", "getStatus");
   for (const name of ["ytDlp", "ffmpeg", "ffprobe"])
@@ -731,6 +1592,26 @@ async function phaseTwoSmoke() {
     (job) => job.status === "downloading" && job.downloadedBytes >= 8192,
     60_000,
   );
+  const product = await value("settings", "getProduct");
+  assert.equal(product.closeBehavior, "tray");
+  assert.equal(product.trayAvailable, true, "system tray initialization failed");
+  const backgroundBefore = (await jobs()).find((item) => item.id === pausedJob.id).downloadedBytes;
+  await page.getByRole("button", { name: label("desktop.window.close"), exact: true }).click();
+  await until("titlebar close hides the window to tray", () =>
+    app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isVisible()),
+  );
+  await until(
+    "download continues while hidden to tray",
+    async () => (await jobs()).find((item) => item.id === pausedJob.id),
+    (job) => job.downloadedBytes > backgroundBefore,
+    30_000,
+  );
+  // Exercise the native activation event that restores an existing hidden window.
+  await app.evaluate(({ app }) => app.emit("second-instance", {}, [], process.cwd(), {}));
+  await until("native activation reopens the hidden window", () =>
+    app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
+  );
+  assert.equal((await value("settings", "getProduct")).firstLaunchCompleted, true);
   await value("downloads", "pause", pausedJob.id);
   const paused = await jobState(pausedJob.id, "paused");
   assert.ok(paused.downloadedBytes > 0);
@@ -755,7 +1636,7 @@ async function phaseTwoSmoke() {
       return { response: 0, checkboxChecked: false };
     };
   });
-  await page.getByRole("button", { name: label("desktop.window.close"), exact: true }).click();
+  await value("window", "exit");
   await until(
     "active exit Cancel prompt",
     () => app.evaluate(() => globalThis.__smokeExitPrompts),
@@ -772,7 +1653,9 @@ async function phaseTwoSmoke() {
   });
   await Promise.all([
     app.waitForEvent("close", { timeout: 30_000 }),
-    page.getByRole("button", { name: label("desktop.window.close"), exact: true }).click(),
+    page.evaluate(() => {
+      void window.mediaVault.window.exit();
+    }),
   ]);
   app = undefined;
   page = undefined;
@@ -819,7 +1702,7 @@ async function phaseTwoSmoke() {
       `Missing activity ${type}`,
     );
   console.log(
-    "[desktop smoke] Progress, pause, active-exit Cancel/Exit, relaunch/resume with HTTP Range, cancel/retry and persisted activity verified.",
+    "[desktop smoke] Background download while hidden to tray, native reopen, progress/pause, explicit-exit Cancel/Exit, relaunch/resume with HTTP Range, cancel/retry and persisted activity verified.",
   );
 
   // Native dialogs are stubbed only at the OS boundary; real files go through ffprobe.
@@ -963,7 +1846,21 @@ try {
     });
     await devServer.listen();
   }
+  await firstRunSmoke();
+  await mkdir(cookieDirectory(), { recursive: true });
+  const staleCookie = join(cookieDirectory(), `cookie-${randomUUID()}.txt`);
+  await writeFile(
+    staleCookie,
+    `# Netscape HTTP Cookie File\n127.0.0.1\tFALSE\t/\tFALSE\t0\t${authCookieName}\t${authCookieValue}\n`,
+    { mode: 0o600 },
+  );
   await launch("persistent-profile");
+  await assert.rejects(
+    access(staleCookie),
+    (error) => error.code === "ENOENT",
+    "startup retained a stale cookie file",
+  );
+  await assertCookieFilesRemoved();
 
   // Accidentally exposing Node or generic IPC must fail even in the app renderer.
   const surface = await page.evaluate(() => ({
@@ -981,13 +1878,28 @@ try {
     "activity",
     "binaries",
     "browser",
+    "diagnostics",
     "downloads",
     "drive",
     "library",
+    "maintenance",
+    "product",
     "settings",
+    "storage",
     "window",
   ]);
+  assert.equal(
+    (await value("settings", "getProduct")).firstLaunchCompleted,
+    true,
+    "existing installations must not see onboarding",
+  );
+  assert.equal(await value("product", "getVersion"), expectedVersion);
+  assert.deepEqual(await bridge("settings", "updateProduct", { firstLaunchCompleted: true }), {
+    ok: false,
+    error: "invalidInput",
+  });
   await verifyDisconnectedDrive();
+  await storageSmoke();
   await value("settings", "update", { homepage: `${origin}/home`, saveSession: true });
 
   // Real links and toolbar controls must move the native view and its address state.
@@ -1053,17 +1965,17 @@ try {
       try {
         await foreign.loadURL(`${origin}/foreign`);
         return await foreign.webContents.executeJavaScript(
-          `Promise.all([window.mediaVault.settings.update(${JSON.stringify({ homepage: `${origin}/foreign-change`, saveSession: false })}), window.mediaVault.drive.getState(), window.mediaVault.settings.getDrive()])`,
+          `Promise.all([window.mediaVault.settings.update(${JSON.stringify({ homepage: `${origin}/foreign-change`, saveSession: false })}), window.mediaVault.drive.getState(), window.mediaVault.settings.getDrive(), window.mediaVault.settings.getProduct(), window.mediaVault.product.getVersion(), window.mediaVault.storage.get(), window.mediaVault.maintenance.get(), window.mediaVault.diagnostics.get()])`,
         );
       } finally {
         foreign.destroy();
       }
     },
-    { origin, preload: join(root, "dist-electron", "preload.cjs") },
+    { origin, preload: join(applicationPath, "dist-electron", "preload.cjs") },
   );
   assert.deepEqual(
     foreignResult,
-    Array.from({ length: 3 }, () => ({ ok: false, error: "unavailable" })),
+    Array.from({ length: 8 }, () => ({ ok: false, error: "unavailable" })),
     "a foreign IPC sender was authorized",
   );
   assert.deepEqual(await value("settings", "get"), protectedSettings);
@@ -1259,6 +2171,8 @@ try {
   }
 
   await phaseTwoSmoke();
+  await authenticatedDownloadSmoke();
+  await diagnosticsSmoke();
 
   // A cookie survives a full process relaunch, without being shared with the shell session.
   await navigate("/home");
@@ -1352,28 +2266,50 @@ try {
   );
   await close();
 
-  // Missing and invalid executables must produce localized error codes without raw process output.
-  await verifyAnalysisError(
-    join(scratch, "missing-yt-dlp.exe"),
-    "binaryMissing",
-    "missing-profile",
-  );
-  const invalidBinary = join(
-    scratch,
-    process.platform === "win32" ? "invalid-yt-dlp.exe" : "invalid-yt-dlp",
-  );
-  await writeFile(invalidBinary, "");
-  await chmod(invalidBinary, 0o755);
-  await verifyAnalysisError(invalidBinary, "binaryInvalid", "invalid-profile");
+  // Packaged binaries are immutable resources; development-only overrides are intentionally unavailable.
+  if (!packagedExecutable) {
+    await verifyAnalysisError(
+      join(scratch, "missing-yt-dlp.exe"),
+      "binaryMissing",
+      "missing-profile",
+    );
+    const invalidBinary = join(
+      scratch,
+      process.platform === "win32" ? "invalid-yt-dlp.exe" : "invalid-yt-dlp",
+    );
+    await writeFile(invalidBinary, "");
+    await chmod(invalidBinary, 0o755);
+    await verifyAnalysisError(invalidBinary, "binaryInvalid", "invalid-profile");
+  }
   assert.deepEqual(rendererErrors, [], "the application renderer emitted uncaught errors");
   console.log(
-    `[desktop smoke] PASS: disconnected Drive/settings/privacy, real download/remux/probe, progress/pause/resume/cancel/retry, SQLite/Library persistence, import/play/remove/delete, navigation/detection/bounds, EN/VI/window controls, IPC/session isolation, cookie persistence, storage clearing, binary errors; ${analysisResult}.`,
+    `[desktop smoke] PASS${packagedExecutable ? " (packaged)" : ""}: onboarding/persistence, tray/background/explicit exit, product metadata, disconnected Drive/settings/privacy, real download/remux/probe, progress/pause/resume/cancel/retry, SQLite/Library persistence, import/play/remove/delete, navigation/detection/bounds, EN/VI/window controls, IPC/session isolation, cookie persistence, authenticated analysis/download/session-loss recovery and secret cleanup, storage clearing, real diagnostics/log privacy/export and unconfigured update controls${packagedExecutable ? ", bundled binaries" : ", binary errors"}; ${analysisResult}.`,
   );
 } catch (error) {
   if (page) {
     console.error(
       "[desktop smoke] Download snapshot:",
-      await bridge("downloads", "list").catch(() => "unavailable"),
+      await bridge("downloads", "list")
+        .then((result) =>
+          result.ok
+            ? result.value.map((job) => ({
+                status: [
+                  "queued",
+                  "analyzing",
+                  "downloading",
+                  "processing",
+                  "paused",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                ].includes(job.status)
+                  ? job.status
+                  : "unknown",
+                progress: Number.isFinite(job.progress) ? job.progress : null,
+              }))
+            : "unavailable",
+        )
+        .catch(() => "unavailable"),
     );
   }
   if (page && process.env.MEDIAVAULT_SMOKE_ARTIFACTS) {

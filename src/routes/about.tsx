@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/app/primitives";
+import { useProductVersion } from "@/hooks/use-desktop-product";
 import { useT } from "@/lib/i18n";
 
 export const Route = createFileRoute("/about")({
@@ -21,6 +22,7 @@ export const Route = createFileRoute("/about")({
 
 function AboutPage() {
   const { t } = useT();
+  const version = useProductVersion();
   return (
     <div className="grid h-full place-items-center p-6">
       <div className="panel w-full max-w-md p-8 text-center">
@@ -31,11 +33,7 @@ function AboutPage() {
         <p className="mt-2 text-sm text-muted-foreground">{t("about.tagline")}</p>
         <dl className="mt-6 grid grid-cols-2 gap-2 text-left text-xs">
           <dt className="text-muted-foreground">{t("about.version")}</dt>
-          <dd className="text-right font-mono">v0.1.0</dd>
-          <dt className="text-muted-foreground">{t("about.build")}</dt>
-          <dd className="text-right font-mono">2026.10.07 · win-x64</dd>
-          <dt className="text-muted-foreground">{t("about.license")}</dt>
-          <dd className="text-right font-mono">MV-PERS-0001</dd>
+          <dd className="text-right font-mono">{version ?? t("desktop.unknown")}</dd>
         </dl>
         <Button variant="subtle" size="sm" className="mt-6" disabled title={t("common.comingSoon")}>
           <RefreshCw />

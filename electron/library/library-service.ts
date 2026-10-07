@@ -11,6 +11,7 @@ import type { ActivityService } from "../services/activity-service";
 import type { DownloadSettingsService } from "../services/download-settings-service";
 import type { FFmpegService } from "../services/ffmpeg-service";
 import { SnapshotEvents } from "../services/snapshot-events";
+import { contentFingerprint } from "./content-fingerprint";
 
 interface Dependencies {
   database: SqliteDatabase;
@@ -18,6 +19,7 @@ interface Dependencies {
   ffmpeg: Pick<FFmpegService, "probeMedia" | "extractThumbnail">;
   settings: DownloadSettingsService;
   activity: ActivityService;
+  fingerprintEnabled?(): boolean;
 }
 interface LocalFile {
   path: string;
@@ -79,8 +81,34 @@ export class LibraryService {
   private readonly waiting: (() => void)[] = [];
   private running = 0;
   private closing = false;
+  private duplicateTail: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: Dependencies) {}
+  private withDuplicateCheck<T>(action: () => Promise<T>): Promise<T> {
+    if (!this.deps.fingerprintEnabled?.()) return action();
+    // Serialize opt-in import decisions so simultaneous copies cannot both commit.
+    const result = this.duplicateTail.then(action, action);
+    this.duplicateTail = result.catch(() => {});
+    return result;
+  }
+  private async isDuplicate(
+    file: LocalFile,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    for (const item of this.deps.media.findFingerprint(file.info.size, fingerprint)) {
+      check(signal);
+      if (pathKey(item.localPath) === pathKey(file.path)) continue;
+      try {
+        const existing = await inspectFile(item.localPath);
+        sameFile(existing, item.fileSize, item.modifiedAt);
+        return true;
+      } catch {
+        /* Stale library records cannot claim newly imported bytes. */
+      }
+    }
+    return false;
+  }
   list(): MediaItem[] {
     return this.deps.media.list();
   }
@@ -157,6 +185,7 @@ export class LibraryService {
       downloadId?: string;
     },
     signal: AbortSignal,
+    fingerprint?: string,
   ): Promise<MediaItem> {
     check(signal);
     sameFile(file, probe.fileSize, file.info.mtimeMs);
@@ -164,6 +193,11 @@ export class LibraryService {
     const thumbnailPath = await this.thumbnail(file, probe, signal);
     try {
       check(signal);
+      const sampled =
+        fingerprint ??
+        (this.deps.fingerprintEnabled?.()
+          ? await contentFingerprint(file.path, signal)
+          : undefined);
       const after = await inspectFile(file.path);
       sameFile(after, file.info.size, file.info.mtimeMs);
       if (pathKey(after.path) !== pathKey(file.path)) throw new Error("fileChanged");
@@ -183,6 +217,7 @@ export class LibraryService {
         modifiedAt: file.info.mtimeMs,
         createdAt: previous?.createdAt ?? now,
         updatedAt: now,
+        ...(sampled ? { contentFingerprint: sampled } : {}),
         ...(probe.videoCodec ? { videoCodec: probe.videoCodec } : {}),
         ...(probe.audioCodec ? { audioCodec: probe.audioCodec } : {}),
         ...(probe.bitrate !== undefined ? { bitrate: probe.bitrate } : {}),
@@ -208,74 +243,110 @@ export class LibraryService {
       await this.importing.get(key)!.catch(() => undefined);
       check(signal);
     }
-    const pending = this.limited(async (): Promise<Outcome> => {
-      check(signal);
-      const file = await inspectFile(original.path);
-      const owner = this.deps.media.getByPath(file.path);
-      const previous = existingId ? this.deps.media.get(existingId) : owner;
-      if (existingId && (!previous || (owner && owner.id !== existingId))) return "skipped";
-      if (previous && pathKey(previous.localPath) !== pathKey(file.path)) return "skipped";
-      if (
-        previous &&
-        previous.fileSize === file.info.size &&
-        previous.modifiedAt === file.info.mtimeMs
-      ) {
-        if (existingId && previous.localAvailable === false) {
-          this.deps.media.save({ ...previous, localAvailable: true, updatedAt: Date.now() });
-          this.events.notify();
+    const pending = this.limited(() =>
+      this.withDuplicateCheck(async (): Promise<Outcome> => {
+        check(signal);
+        const file = await inspectFile(original.path);
+        const owner = this.deps.media.getByPath(file.path);
+        const previous = existingId ? this.deps.media.get(existingId) : owner;
+        if (existingId && (!previous || (owner && owner.id !== existingId))) return "skipped";
+        if (previous && pathKey(previous.localPath) !== pathKey(file.path)) return "skipped";
+        if (
+          previous &&
+          previous.fileSize === file.info.size &&
+          previous.modifiedAt === file.info.mtimeMs
+        ) {
+          const backfill = this.deps.fingerprintEnabled?.() && !previous.contentFingerprint;
+          const restore = existingId && previous.localAvailable === false;
+          if (backfill || restore) {
+            const fingerprint = backfill
+              ? await contentFingerprint(file.path, signal)
+              : previous.contentFingerprint;
+            const after = await inspectFile(file.path);
+            sameFile(after, file.info.size, file.info.mtimeMs);
+            if (pathKey(after.path) !== pathKey(file.path)) throw new Error("fileChanged");
+            check(signal);
+            const latest = this.deps.media.get(previous.id);
+            const latestOwner = this.deps.media.getByPath(file.path);
+            if (
+              !latest ||
+              pathKey(latest.localPath) !== pathKey(file.path) ||
+              latest.fileSize !== file.info.size ||
+              latest.modifiedAt !== file.info.mtimeMs ||
+              (latest.localAvailable === false) !== (previous.localAvailable === false) ||
+              (latestOwner && latestOwner.id !== latest.id)
+            )
+              return "skipped";
+            // Hashing yields to removal, cloud completion and local availability changes.
+            // Commit the still-current record once, preserving both cloud fields and the sample.
+            this.deps.media.save({
+              ...latest,
+              ...(fingerprint ? { contentFingerprint: fingerprint } : {}),
+              ...(restore ? { localAvailable: true } : {}),
+              updatedAt: Date.now(),
+            });
+            this.events.notify();
+          }
+          return "skipped";
         }
-        return "skipped";
-      }
-      // A last-known path is not permission to attach different bytes to a cloud record.
-      if (previous?.localAvailable === false) return "skipped";
-      const probe = await this.deps.ffmpeg.probeMedia(file.path, signal);
-      const item = await this.metadata(
-        file,
-        probe,
-        {
-          title: previous?.title ?? basename(file.path, extname(file.path)),
-          sourceType: previous?.sourceType ?? "local",
-          ...(previous?.sourceUrl ? { sourceUrl: previous.sourceUrl } : {}),
-          ...(previous?.downloadId ? { downloadId: previous.downloadId } : {}),
-        },
-        signal,
-      );
-      check(signal);
-      const latest = previous ? this.deps.media.get(previous.id) : undefined;
-      if (
-        previous &&
-        (!latest ||
-          latest.localAvailable === false ||
-          pathKey(latest.localPath) !== pathKey(previous.localPath) ||
-          latest.fileSize !== previous.fileSize ||
-          latest.modifiedAt !== previous.modifiedAt)
-      ) {
-        await this.removeThumbnail(item.thumbnailPath);
-        return "skipped";
-      }
-      // Upload completion can commit while ffprobe/thumbnail generation is awaited.
-      // Preserve those fields, but distinguish a newly changed local version from the cloud copy.
-      if (latest) {
-        item.id = latest.id;
-        item.createdAt = latest.createdAt;
-        if (latest.localAvailable !== undefined) item.localAvailable = true;
-        if (latest.driveAvailable !== undefined) item.driveAvailable = latest.driveAvailable;
-        if (latest.driveFileId !== undefined) item.driveFileId = latest.driveFileId;
-        if (latest.driveAccountId !== undefined) item.driveAccountId = latest.driveAccountId;
-        if (latest.driveUploadedAt !== undefined) item.driveUploadedAt = latest.driveUploadedAt;
-        if (latest.driveStatus !== undefined) item.driveStatus = latest.driveStatus;
-        if (latest.driveFileId) item.driveStatus = "changed";
-        if (!item.thumbnailPath && latest.thumbnailPath) item.thumbnailPath = latest.thumbnailPath;
-      }
-      this.deps.database.transaction(() => {
-        this.deps.media.save(item);
-        if (!previous) this.deps.activity.add("mediaAdded", item.title, { mediaId: item.id });
-      });
-      if (latest?.thumbnailPath !== item.thumbnailPath)
-        await this.removeThumbnail(latest?.thumbnailPath);
-      this.events.notify();
-      return "added";
-    });
+        // A last-known path is not permission to attach different bytes to a cloud record.
+        if (previous?.localAvailable === false) return "skipped";
+        const fingerprint = this.deps.fingerprintEnabled?.()
+          ? await contentFingerprint(file.path, signal)
+          : undefined;
+        if (!previous && fingerprint && (await this.isDuplicate(file, fingerprint, signal)))
+          return "skipped";
+        const probe = await this.deps.ffmpeg.probeMedia(file.path, signal);
+        const item = await this.metadata(
+          file,
+          probe,
+          {
+            title: previous?.title ?? basename(file.path, extname(file.path)),
+            sourceType: previous?.sourceType ?? "local",
+            ...(previous?.sourceUrl ? { sourceUrl: previous.sourceUrl } : {}),
+            ...(previous?.downloadId ? { downloadId: previous.downloadId } : {}),
+          },
+          signal,
+          fingerprint,
+        );
+        check(signal);
+        const latest = previous ? this.deps.media.get(previous.id) : undefined;
+        if (
+          previous &&
+          (!latest ||
+            latest.localAvailable === false ||
+            pathKey(latest.localPath) !== pathKey(previous.localPath) ||
+            latest.fileSize !== previous.fileSize ||
+            latest.modifiedAt !== previous.modifiedAt)
+        ) {
+          await this.removeThumbnail(item.thumbnailPath);
+          return "skipped";
+        }
+        // Upload completion can commit while ffprobe/thumbnail generation is awaited.
+        // Preserve those fields, but distinguish a newly changed local version from the cloud copy.
+        if (latest) {
+          item.id = latest.id;
+          item.createdAt = latest.createdAt;
+          if (latest.localAvailable !== undefined) item.localAvailable = true;
+          if (latest.driveAvailable !== undefined) item.driveAvailable = latest.driveAvailable;
+          if (latest.driveFileId !== undefined) item.driveFileId = latest.driveFileId;
+          if (latest.driveAccountId !== undefined) item.driveAccountId = latest.driveAccountId;
+          if (latest.driveUploadedAt !== undefined) item.driveUploadedAt = latest.driveUploadedAt;
+          if (latest.driveStatus !== undefined) item.driveStatus = latest.driveStatus;
+          if (latest.driveFileId) item.driveStatus = "changed";
+          if (!item.thumbnailPath && latest.thumbnailPath)
+            item.thumbnailPath = latest.thumbnailPath;
+        }
+        this.deps.database.transaction(() => {
+          this.deps.media.save(item);
+          if (!previous) this.deps.activity.add("mediaAdded", item.title, { mediaId: item.id });
+        });
+        if (latest?.thumbnailPath !== item.thumbnailPath)
+          await this.removeThumbnail(latest?.thumbnailPath);
+        this.events.notify();
+        return "added";
+      }),
+    );
     this.importing.set(key, pending);
     try {
       return await pending;

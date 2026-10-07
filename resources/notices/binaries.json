@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "completeCorrespondingSourceVerified": false,
+  "binaries": [
+    {
+      "file": "yt-dlp.exe",
+      "version": "2026.08.19",
+      "bytes": 17840399,
+      "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
+      "license": "GPL-3.0-or-later (standalone combined executable); Unlicense (yt-dlp source)",
+      "licenseFiles": [
+        "yt-dlp-LICENSE.txt",
+        "yt-dlp-THIRD-PARTY-LICENSES.txt",
+        "FFmpeg-COPYING-GPL-3.0.txt"
+      ],
+      "binaryUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe",
+      "checksumUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/SHA2-256SUMS",
+      "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.tar.gz",
+      "buildSourceUrl": "https://github.com/yt-dlp/yt-dlp/tree/2026.08.19/bundle",
+      "componentSourcesUrl": "https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/THIRD_PARTY_LICENSES.txt"
+    },
+    {
+      "file": "ffmpeg.exe",
+      "version": "9.0.2",
+      "build": "9.0.2-essentials_build-www.gyan.dev",
+      "bytes": 105423872,
+      "sha256": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec",
+      "license": "GPL-3.0-or-later",
+      "licenseFiles": ["FFmpeg-COPYING-GPL-3.0.txt", "FFmpeg-LICENSE.md"],
+      "binaryUrl": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+      "archiveSha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+      "checksumUrl": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip.sha256",
+      "sourceUrl": "https://github.com/FFmpeg/FFmpeg/tree/946fcce07b",
+      "buildSourceUrl": "https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2",
+      "componentSourcesVerified": false
+    },
+    {
+      "file": "ffprobe.exe",
+      "version": "9.0.2",
+      "build": "9.0.2-essentials_build-www.gyan.dev",
+      "bytes": 105221120,
+      "sha256": "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52",
+      "license": "GPL-3.0-or-later",
+      "licenseFiles": ["FFmpeg-COPYING-GPL-3.0.txt", "FFmpeg-LICENSE.md"],
+      "binaryUrl": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+      "archiveSha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+      "checksumUrl": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip.sha256",
+      "sourceUrl": "https://github.com/FFmpeg/FFmpeg/tree/946fcce07b",
+      "buildSourceUrl": "https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2",
+      "componentSourcesVerified": false
+    }
+  ]
+}

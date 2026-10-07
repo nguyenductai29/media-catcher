@@ -16,13 +16,46 @@ import type {
   DriveUpload,
   DriveSettings,
   DriveSnapshot,
+  ProductSettings,
+  ProductPreferences,
+  ProductRoute,
+  StorageSnapshot,
+  StorageCleanup,
+  MaintenanceSnapshot,
+  YtDlpUpdateState,
+  AppUpdateState,
+  DiagnosticsSnapshot,
+  DiagnosticLogEntry,
+  LogFilter,
 } from "./models";
 
 export interface MediaVaultAPI {
+  maintenance: {
+    get(): Promise<Result<MaintenanceSnapshot>>;
+    checkYtDlp(): Promise<Result<YtDlpUpdateState>>;
+    updateYtDlp(): Promise<Result<YtDlpUpdateState>>;
+    checkApp(): Promise<Result<AppUpdateState>>;
+    downloadApp(): Promise<Result<AppUpdateState>>;
+    installApp(): Promise<Result<void>>;
+  };
+  diagnostics: {
+    get(): Promise<Result<DiagnosticsSnapshot>>;
+    logs(filter?: LogFilter): Promise<Result<DiagnosticLogEntry[]>>;
+    copyLog(id: string): Promise<Result<void>>;
+    openLogs(): Promise<Result<void>>;
+    clearLogs(): Promise<Result<void>>;
+    exportDiagnostics(): Promise<Result<boolean>>;
+  };
+  storage: {
+    get(): Promise<Result<StorageSnapshot>>;
+    clean(action: StorageCleanup): Promise<Result<StorageSnapshot>>;
+    setFingerprintEnabled(enabled: boolean): Promise<Result<StorageSnapshot>>;
+  };
   window: {
     minimize(): Promise<Result<void>>;
     maximize(): Promise<Result<WindowState>>;
     close(): Promise<Result<void>>;
+    exit(): Promise<Result<void>>;
     getState(): Promise<Result<WindowState>>;
     onState(listener: (state: WindowState) => void): () => void;
   };
@@ -50,6 +83,14 @@ export interface MediaVaultAPI {
     setLanguage(language: "en" | "vi"): Promise<Result<void>>;
     getDrive(): Promise<Result<DriveSettings>>;
     updateDrive(settings: DriveSettings): Promise<Result<DriveSettings>>;
+    getProduct(): Promise<Result<ProductSettings>>;
+    updateProduct(settings: ProductPreferences): Promise<Result<ProductSettings>>;
+    completeFirstLaunch(): Promise<Result<ProductSettings>>;
+  };
+  product: {
+    getVersion(): Promise<Result<string>>;
+    onChanged(listener: (settings: ProductSettings) => void): () => void;
+    onNavigate(listener: (route: ProductRoute) => void): () => void;
   };
   binaries: {
     status(): Promise<Result<BinaryStatus>>;

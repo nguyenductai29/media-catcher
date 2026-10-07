@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Cloud, Database, Download, FolderOpen, Globe, Settings2 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Cloud, Database, Download, FolderOpen, Globe, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -16,11 +15,16 @@ import { LangSwitch } from "@/components/app/AppShell";
 import { useT } from "@/lib/i18n";
 import { useDesktopAPI } from "@/hooks/use-desktop";
 import { DownloadOptions } from "@/components/app/DownloadDialog";
-import { useDesktopAction, useDesktopLibrary } from "@/hooks/use-desktop-collections";
+import { useDesktopAction } from "@/hooks/use-desktop-collections";
 import { useDesktopDrive, useDriveAccountActions } from "@/hooks/use-desktop-drive";
 import { DriveAccountControls } from "@/components/app/DriveControls";
-import { hasLocalFile } from "@/lib/drive-display";
+import { ProductPreferenceFields } from "@/components/app/ProductPreferenceFields";
+import { useDesktopProduct, productPreferences } from "@/hooks/use-desktop-product";
 import { formatBytes } from "@/lib/media-display";
+import { SettingsSection as Section, SettingsRow as Row } from "@/components/app/SettingsSection";
+import { AppUpdateSettings, YtDlpMaintenance } from "@/components/app/MaintenanceSettings";
+import { DiagnosticsSettings } from "@/components/app/DiagnosticsSettings";
+import { useDesktopMaintenance, type DesktopMaintenance } from "@/hooks/use-desktop-maintenance";
 import type {
   BinaryStatuses,
   BrowserSettings,
@@ -28,6 +32,8 @@ import type {
   DriveSettings,
   ErrorCode,
   Result,
+  ProductPreferences,
+  StorageSnapshot,
 } from "../../shared/models";
 
 export const Route = createFileRoute("/settings")({
@@ -45,64 +51,26 @@ export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
-function Section({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: LucideIcon;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="panel">
-      <h2 className="flex items-center gap-2 border-b border-border px-5 py-3 text-sm font-bold">
-        <Icon className="size-4 text-primary" />
-        {title}
-      </h2>
-      <div className="divide-y divide-border">{children}</div>
-    </section>
-  );
-}
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-6 px-5 py-3">
-      <span className="text-sm">{label}</span>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  );
-}
-function Toggle({ label, on = false }: { label: string; on?: boolean }) {
-  return (
-    <Row label={label}>
-      <Switch aria-label={label} defaultChecked={on} disabled title={label} />
-    </Row>
-  );
-}
 function SettingsPage() {
   const { t } = useT();
+  const maintenance = useDesktopMaintenance();
   return (
     <div className="h-full overflow-y-auto p-6">
       <PageHeader title={t("nav.settings")} />
       <div className="mt-5 grid max-w-5xl gap-4 xl:grid-cols-2">
         <div className="space-y-4">
-          <Section icon={Settings2} title={t("settings.general")}>
-            <Row label={t("settings.language")}>
-              <LangSwitch />
-            </Row>
-            <p className="px-5 py-3 text-xs text-muted-foreground">{t("common.comingSoon")}</p>
-            <Toggle label={t("settings.startWin")} />
-            <Toggle label={t("settings.tray")} />
-            <Toggle label={t("settings.background")} />
-            <Toggle label={t("settings.updates")} />
-          </Section>
+          <GeneralSettingsSection />
           <DownloadSettingsSection />
-          <BinarySettingsSection />
+          <BinarySettingsSection maintenance={maintenance} />
+          <AppUpdateSettings maintenance={maintenance} />
         </div>
         <div className="space-y-4">
           <BrowserSettingsSection />
           <DriveSettingsSection />
           <StorageSection />
+        </div>
+        <div className="min-w-0 xl:col-span-2">
+          <DiagnosticsSettings />
         </div>
       </div>
     </div>
@@ -351,7 +319,7 @@ function DownloadSettingsSection() {
     </Section>
   );
 }
-function BinarySettingsSection() {
+function BinarySettingsSection({ maintenance }: { maintenance: DesktopMaintenance }) {
   const { t } = useT();
   const api = useDesktopAPI();
   const [status, setStatus] = useState<BinaryStatuses | null>(null);
@@ -394,25 +362,32 @@ function BinarySettingsSection() {
   };
   return (
     <Section icon={Settings2} title={t("settings.binaries")}>
-      {(["ytDlp", "ffmpeg", "ffprobe"] as const).map((key) => (
-        <Row key={key} label={t(`settings.binary.${key}`)}>
-          <span
-            className={`text-xs ${status?.[key].state === "ready" ? "text-success" : "text-muted-foreground"}`}
-          >
-            {status
-              ? t(`settings.binary.${status[key].state}`)
-              : t(api ? "desktop.checking" : "desktop.analyzerMissing")}
-            {status?.[key].version && ` · ${status[key].version}`}
-          </span>
-        </Row>
-      ))}
+      {(["ytDlp", "ffmpeg", "ffprobe"] as const).map((key) => {
+        const updatedVersion = key === "ytDlp" ? maintenance.snapshot?.ytDlp.currentVersion : null;
+        const detail = updatedVersion ? { state: "ready", version: updatedVersion } : status?.[key];
+        return (
+          <Row key={key} label={t(`settings.binary.${key}`)}>
+            <span
+              className={`text-xs ${detail?.state === "ready" ? "text-success" : "text-muted-foreground"}`}
+            >
+              {detail
+                ? t(`settings.binary.${detail.state}`)
+                : t(api ? "desktop.checking" : "desktop.analyzerMissing")}
+              {detail?.version && ` · ${detail.version}`}
+            </span>
+          </Row>
+        );
+      })}
       <div className="space-y-3 px-5 py-3">
         <p className="text-xs text-muted-foreground">{t("settings.toolsHint")}</p>
         <Button
           size="sm"
           variant="outline"
           disabled={!api || checking}
-          onClick={() => void refresh()}
+          onClick={() => {
+            void refresh();
+            void maintenance.refresh();
+          }}
         >
           {t(checking ? "desktop.checking" : "desktop.refreshStatus")}
         </Button>
@@ -422,25 +397,120 @@ function BinarySettingsSection() {
           </p>
         )}
       </div>
+      <YtDlpMaintenance maintenance={maintenance} />
     </Section>
   );
 }
 function StorageSection() {
   const { t, lang } = useT();
-  const { items } = useDesktopLibrary();
+  const api = useDesktopAPI();
+  const action = useDesktopAction();
+  const [snapshot, setSnapshot] = useState<StorageSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ErrorCode | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!api) {
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    void api.storage
+      .get()
+      .then((result) => {
+        if (!active) return;
+        if (result.ok) setSnapshot(result.value);
+        else setError(result.error);
+      })
+      .catch(() => {
+        if (active) setError("storageFailed");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
+  const perform = async (operation: () => Promise<Result<StorageSnapshot>>, success?: string) => {
+    setNotice(null);
+    const result = await action.run(operation);
+    if (result?.ok) {
+      setSnapshot(result.value);
+      setError(null);
+      setNotice(success ?? null);
+    }
+  };
+  const disabled = !api || !snapshot || loading || action.busy;
   return (
     <Section icon={Database} title={t("settings.storage")}>
-      <div className="px-5 py-4">
-        <p className="text-xs text-muted-foreground">
-          {t("desktop.librarySize", {
-            size: formatBytes(
-              items.filter(hasLocalFile).reduce((n, item) => n + item.fileSize, 0),
-              lang,
-              t("desktop.unknown"),
-            ),
-          })}
-        </p>
+      <div className="flex items-center justify-between gap-3 px-5 py-3">
+        <span className="text-xs text-muted-foreground">
+          {t(!api ? "desktop.launchTitle" : loading ? "common.loading" : "storage.overview")}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!api || loading || action.busy}
+          onClick={() => {
+            if (api) void perform(() => api.storage.get());
+          }}
+        >
+          <RefreshCw className={loading || action.busy ? "animate-spin" : ""} />
+          {t("storage.refresh")}
+        </Button>
       </div>
+      {(["downloads", "temp", "thumbnails", "database", "logs"] as const).map((key) => (
+        <Row key={key} label={t(`storage.sizes.${key}`)}>
+          <span className="font-mono text-xs">
+            {formatBytes(snapshot?.[key], lang, t("desktop.unknown"))}
+          </span>
+        </Row>
+      ))}
+      <div className="space-y-3 px-5 py-4">
+        <div className="flex flex-wrap gap-2">
+          {(["staleTemp", "oldLogs", "unusedThumbnails"] as const).map((kind) => (
+            <Button
+              key={kind}
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => {
+                if (api) void perform(() => api.storage.clean(kind), `storage.cleaned.${kind}`);
+              }}
+            >
+              {t(`storage.clean.${kind}`)}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">{t("storage.cleanupHint")}</p>
+      </div>
+      <Row label={t("storage.fingerprint")}>
+        <Switch
+          aria-label={t("storage.fingerprint")}
+          checked={snapshot?.fingerprintEnabled ?? false}
+          disabled={disabled}
+          onCheckedChange={(enabled) => {
+            if (api)
+              void perform(
+                () => api.storage.setFingerprintEnabled(enabled),
+                "storage.fingerprintSaved",
+              );
+          }}
+        />
+      </Row>
+      <p className="px-5 py-3 text-xs text-muted-foreground">{t("storage.fingerprintHint")}</p>
+      {(action.error || error) && (
+        <p role="alert" className="px-5 py-3 text-xs text-destructive">
+          {t(`desktop.errors.${action.error ?? error}`)}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="px-5 py-3 text-xs text-success">
+          {t(notice)}
+        </p>
+      )}
     </Section>
   );
 }
@@ -566,6 +636,102 @@ function DriveSettingsSection() {
         {saved && (
           <p role="status" className="text-xs text-success">
             {t("settings.driveSaved")}
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function GeneralSettingsSection() {
+  const { t } = useT();
+  const product = useDesktopProduct();
+  const action = useDesktopAction();
+  const [draft, setDraft] = useState<ProductPreferences | null>(null);
+  const dirty = useRef(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (product.settings && !dirty.current) setDraft(productPreferences(product.settings));
+  }, [product.settings]);
+  const change = (patch: Partial<ProductPreferences>) => {
+    dirty.current = true;
+    setSaved(false);
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+  };
+  const save = async () => {
+    if (!product.api || !draft) return;
+    setSaved(false);
+    const result = await action.run(async () => {
+      const updated = await product.api!.settings.updateProduct(draft);
+      if (!updated.ok && ["startupFailed", "startupUnsupported"].includes(updated.error)) {
+        const refreshed = await product.api!.settings.getProduct().catch(() => null);
+        const actual = refreshed?.ok ? refreshed.value : product.settings;
+        if (actual) {
+          product.accept(actual);
+          setDraft((current) =>
+            current ? { ...current, startWithWindows: actual.startWithWindows } : current,
+          );
+        }
+      }
+      return updated;
+    });
+    if (result?.ok) {
+      dirty.current = false;
+      setDraft(productPreferences(result.value));
+      product.accept(result.value);
+      setSaved(true);
+    }
+  };
+  return (
+    <Section icon={Settings2} title={t("settings.general")}>
+      <Row label={t("settings.language")}>
+        <LangSwitch />
+      </Row>
+      {!product.api && (
+        <p className="px-5 py-3 text-xs text-muted-foreground">{t("desktop.launchHint")}</p>
+      )}
+      {draft && product.settings ? (
+        <div className="px-5 py-4">
+          <ProductPreferenceFields
+            value={draft}
+            capabilities={product.settings}
+            disabled={action.busy}
+            onChange={change}
+          />
+        </div>
+      ) : (
+        <p className="px-5 py-3 text-xs text-muted-foreground">
+          {t(product.api ? "common.loading" : "desktop.unknown")}
+        </p>
+      )}
+      <div className="space-y-3 px-5 py-3">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            disabled={!draft || !product.api || action.busy}
+            onClick={() => void save()}
+          >
+            {t(action.busy ? "desktop.saving" : "product.save")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!product.api || action.busy}
+            onClick={() => {
+              if (product.api) void action.run(() => product.api!.window.exit());
+            }}
+          >
+            {t("product.exit")}
+          </Button>
+        </div>
+        {(action.error || product.error) && (
+          <p role="alert" className="text-xs text-destructive">
+            {t(`desktop.errors.${action.error ?? product.error}`)}
+          </p>
+        )}
+        {saved && (
+          <p role="status" className="text-xs text-success">
+            {t("product.saved")}
           </p>
         )}
       </div>

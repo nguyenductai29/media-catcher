@@ -1,6 +1,16 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,13 +22,23 @@ import type { DownloadProgress } from "./download-progress";
 import { DownloadWorker } from "./download-worker";
 
 // Keep disk capacity deterministic; publication, confinement and cleanup use real files.
-vi.mock("node:fs/promises", async (original) => ({
-  ...(await original<typeof import("node:fs/promises")>()),
-  statfs: async () => ({ bavail: 10 * 1024 ** 3, bsize: 1 }),
-}));
+const capabilities = vi.hoisted(() => ({ denyLinks: false }));
+vi.mock("node:fs/promises", async (original) => {
+  const fs = await original<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    statfs: async () => ({ bavail: 10 * 1024 ** 3, bsize: 1 }),
+    link: async (source: string, target: string) => {
+      if (capabilities.denyLinks)
+        throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" });
+      return fs.link(source, target);
+    },
+  };
+});
 
 const directories: string[] = [];
 afterEach(async () => {
+  capabilities.denyLinks = false;
   for (const directory of directories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
   }
@@ -79,6 +99,24 @@ async function fixture(options: { forbidDownload?: boolean; invalidMedia?: boole
 }
 
 describe("download worker recovery and publication", () => {
+  it("rejects unsupported publication before starting a download and removes its probe", async () => {
+    const f = await fixture({ forbidDownload: true });
+    capabilities.denyLinks = true;
+    await expect(f.execute()).rejects.toThrow("publicationUnavailable");
+    expect(await readdir(f.destination)).toEqual([]);
+  });
+  it("reuses a same-volume output published immediately before a crash checkpoint", async () => {
+    const f = await fixture();
+    const work = join(f.tempDirectory, f.job.id);
+    await mkdir(work, { recursive: true });
+    const staged = join(work, "media.mp4"),
+      output = join(f.destination, "Movie.mp4");
+    await writeFile(staged, "fixture media");
+    await link(staged, output);
+    const result = await f.execute();
+    expect(result.outputPath).toBe(output);
+    expect(await readdir(f.destination)).toEqual(["Movie.mp4"]);
+  });
   it("recreates a missing recorded output without overwriting another movie", async () => {
     const f = await fixture();
     f.job.outputPath = join(f.destination, "removed.mp4");

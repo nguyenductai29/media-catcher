@@ -10,6 +10,7 @@ import { registerIPC } from "../ipc/register-ipc";
 import { SettingsService } from "../services/settings-service";
 import type { BinaryService } from "../services/binary-service";
 import type { YtDlpService } from "../downloads/ytdlp-service";
+import type { BrowserCookieBridge } from "./browser-cookie-bridge";
 
 interface SessionFixture extends EventEmitter {
   partition: string;
@@ -181,7 +182,7 @@ describe("browser session and navigation lifecycle", () => {
     }) as unknown as BrowserWindow;
   });
   afterEach(async () => {
-    manager?.dispose();
+    await manager?.dispose();
     await rm(directory, { recursive: true, force: true });
   });
 
@@ -201,6 +202,77 @@ describe("browser session and navigation lifecycle", () => {
   function connectIPC() {
     registerIPC(window, manager, settings, {} as BinaryService, "mediavault://app");
   }
+
+  it.each(["clear", "change"])(
+    "drains cookie leases before completing a %s transition",
+    async (operation) => {
+      const gate = deferred();
+      const cookies = {
+        bind: vi.fn(),
+        invalidate: vi.fn(() => gate.promise),
+        shutdown: vi.fn(async () => {}),
+      };
+      manager = new BrowserManager(
+        window,
+        settings,
+        {} as YtDlpService,
+        cookies as unknown as BrowserCookieBridge,
+      );
+      const old = fixtures.views.at(-1)!.webContents;
+      const pending = operation === "clear" ? manager.clearData(true) : manager.changeSession();
+      expect(cookies.invalidate).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(old.destroyed).toBe(true));
+      expect(old.session.clearStorageData).not.toHaveBeenCalled();
+      expect(cookies.bind).toHaveBeenCalledOnce();
+      gate.resolve();
+      await pending;
+      expect(cookies.bind).toHaveBeenCalledTimes(2);
+      if (operation === "clear") expect(old.session.clearStorageData).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("awaits cookie shutdown and never rebinds when disposing", async () => {
+    const gate = deferred();
+    const cookies = {
+      bind: vi.fn(),
+      invalidate: vi.fn(async () => {}),
+      shutdown: vi.fn(() => gate.promise),
+    };
+    manager = new BrowserManager(
+      window,
+      settings,
+      {} as YtDlpService,
+      cookies as unknown as BrowserCookieBridge,
+    );
+    let done = false;
+    const pending = Promise.resolve(manager.dispose()).then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    expect(cookies.shutdown).toHaveBeenCalledOnce();
+    gate.resolve();
+    await pending;
+    expect(cookies.bind).toHaveBeenCalledOnce();
+  });
+  it("drains an aborted public analysis before finishing disposal", async () => {
+    const gate = deferred();
+    const analyze = vi.fn(async () => {
+      await gate.promise;
+      throw new Error("cancelled");
+    });
+    manager = new BrowserManager(window, settings, { analyze } as unknown as YtDlpService);
+    const scan = manager.scan();
+    let done = false;
+    const closing = manager.dispose().then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(done).toBe(false);
+    gate.resolve();
+    await scan;
+    await closing;
+  });
 
   it("waits for the old page to be destroyed before clearing storage and opens the safe homepage", async () => {
     const old = create();

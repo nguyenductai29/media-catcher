@@ -6,12 +6,13 @@ import type { DownloadSettingsService } from "../services/download-settings-serv
 import type { YtDlpService } from "./ytdlp-service";
 import type { DownloadProgress } from "./download-progress";
 import {
+  assertAtomicPublication,
   assertFreeSpace,
   confinedPath,
   fileErrorCode,
-  publishFile,
   validateOwnedFile,
 } from "./download-files";
+import { publishRecoverably, recoverPublication, releasePublication } from "./publication";
 
 export interface DownloadedFile {
   outputPath: string;
@@ -44,6 +45,7 @@ export class DownloadWorker implements DownloadExecutor {
     // Persisted job destinations were approved by the native picker when queued.
     await this.settings.approveDirectory(job.destinationDirectory);
     let outputPath = job.outputPath;
+    const workDirectory = confinedPath(this.settings.tempDirectory, job.id);
     if (outputPath) {
       try {
         await validateOwnedFile(job.destinationDirectory, outputPath);
@@ -59,9 +61,17 @@ export class DownloadWorker implements DownloadExecutor {
       }
     }
     if (!outputPath) {
+      outputPath = await recoverPublication(job.destinationDirectory, job.title, workDirectory);
+      if (outputPath) {
+        progress({ status: "processing", outputPath });
+        await releasePublication(job.destinationDirectory, workDirectory);
+        check();
+      }
+    }
+    if (!outputPath) {
       await mkdir(this.settings.tempDirectory, { recursive: true });
-      const workDirectory = confinedPath(this.settings.tempDirectory, job.id);
       await mkdir(workDirectory, { recursive: true });
+      await assertAtomicPublication(job.destinationDirectory);
       await assertFreeSpace(job.destinationDirectory, job.totalBytes);
       // Temporary and destination files coexist during publication.
       await assertFreeSpace(
@@ -76,13 +86,16 @@ export class DownloadWorker implements DownloadExecutor {
       check();
       const info = await stat(temporaryFile);
       await assertFreeSpace(job.destinationDirectory, info.size);
-      outputPath = await publishFile(
+      outputPath = await publishRecoverably(
         temporaryFile,
         job.destinationDirectory,
         job.title,
         extname(temporaryFile),
+        workDirectory,
+        signal,
       );
       progress({ status: "processing", outputPath });
+      await releasePublication(job.destinationDirectory, workDirectory);
       check();
     }
     await validateOwnedFile(job.destinationDirectory, outputPath);
@@ -99,6 +112,7 @@ export class DownloadWorker implements DownloadExecutor {
     const info = await lstat(directory);
     if (!info.isDirectory() || info.isSymbolicLink() || (await realpath(directory)) !== directory)
       return;
+    await releasePublication(job.destinationDirectory, directory);
     await rm(directory, { recursive: true, force: true });
   }
 }

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="512" height="512">
+  <title>MediaVault</title>
+  <rect x="2" y="2" width="28" height="28" rx="8" fill="#2ccceb" fill-opacity=".15" stroke="#2ccceb" stroke-width="1.5"/>
+  <path d="M8 9h16M8 23h16" fill="none" stroke="#2ccceb" stroke-opacity=".5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M13 12.5v7l6-3.5z" fill="#2ccceb"/>
+</svg>

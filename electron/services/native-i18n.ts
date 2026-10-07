@@ -1,6 +1,10 @@
 import en from "../../src/locales/en.json";
 import vi from "../../src/locales/vi.json";
-export function nativeText(language: "en" | "vi", key: string): string {
+export function nativeText(
+  language: "en" | "vi",
+  key: string,
+  variables?: Record<string, string | number>,
+): string {
   const lookup = (root: unknown) =>
     key
       .split(".")
@@ -12,5 +16,9 @@ export function nativeText(language: "en" | "vi", key: string): string {
         root,
       );
   const result = lookup(language === "vi" ? vi : en) ?? lookup(en);
-  return typeof result === "string" ? result : key;
+  return typeof result === "string"
+    ? result.replace(/\{(\w+)\}/g, (match, name: string) =>
+        variables?.[name] === undefined ? match : String(variables[name]),
+      )
+    : key;
 }

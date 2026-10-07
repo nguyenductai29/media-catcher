@@ -48,6 +48,7 @@ describe("structured yt-dlp download boundary", () => {
     expect(args).toContain("--ignore-config");
     expect(args).toContain("--no-plugin-dirs");
     expect(args).toContain("--continue");
+    expect(args).toContain("--keep-video");
     expect(args.slice(-2)).toEqual(["--", job.sourceUrl]);
     expect(args).toContain("bv*+ba/b");
     expect(args).toContain("--remux-video");

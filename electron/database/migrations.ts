@@ -98,6 +98,14 @@ export const migrations: readonly Migration[] = [
     CREATE INDEX activity_created ON activity_logs(created_at DESC);
   `,
   },
+  {
+    version: 3,
+    sql: `
+    ALTER TABLE downloads ADD COLUMN requires_browser_session INTEGER NOT NULL DEFAULT 0 CHECK(requires_browser_session IN (0,1));
+    ALTER TABLE media ADD COLUMN content_fingerprint TEXT;
+    CREATE INDEX media_content_fingerprint ON media(file_size, content_fingerprint) WHERE local_available = 1;
+  `,
+  },
 ];
 
 /** All pending schema changes and the version update commit together. */

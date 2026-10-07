@@ -18,7 +18,7 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
-async function setup() {
+async function setup(isOnline?: () => boolean) {
   const root = await mkdtemp(join(tmpdir(), "mv-queue-"));
   const database = new SqliteDatabase(join(root, "data"));
   const downloads = new DownloadRepository(database),
@@ -57,6 +57,7 @@ async function setup() {
     settings,
     activity,
     executor,
+    ...(isOnline ? { isOnline } : {}),
     prepareMedia: async (job, file) => ({
       id: `media-${job.id}`,
       downloadId: job.id,
@@ -131,6 +132,33 @@ async function setup() {
   };
 }
 describe("persisted download scheduler", () => {
+  it("pauses offline work without starting a process and resumes only by user action", async () => {
+    let online = false;
+    const f = await setup(() => online);
+    const job = await f.add();
+    await vi.waitFor(() => expect(f.downloads.get(job.id)?.error).toBe("networkUnavailable"));
+    expect(f.downloads.get(job.id)?.status).toBe("paused");
+    expect(f.executor.execute).not.toHaveBeenCalled();
+    online = true;
+    f.manager.settingsChanged();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(f.executor.execute).not.toHaveBeenCalled();
+    f.manager.resume(job.id);
+    await vi.waitFor(() => expect(f.executor.execute).toHaveBeenCalledTimes(1));
+  });
+  it.each(["networkUnavailable", "browserSessionRequired"])(
+    "preserves resumable jobs after %s without auto-retry",
+    async (code) => {
+      const f = await setup();
+      await f.settings.update({ ...f.settings.get(), autoRetry: true });
+      const job = await f.add();
+      await vi.waitFor(() => expect(f.running.has(job.id)).toBe(true));
+      f.running.get(job.id)!.reject(new Error(code));
+      await vi.waitFor(() => expect(f.downloads.get(job.id)?.status).toBe("paused"));
+      expect(f.downloads.get(job.id)?.error).toBe(code);
+      expect(f.executor.execute).toHaveBeenCalledTimes(1);
+    },
+  );
   it("limits concurrency and continues other jobs after failure", async () => {
     const f = await setup();
     const a = await f.add(),

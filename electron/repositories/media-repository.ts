@@ -29,11 +29,12 @@ interface MediaRow {
   drive_account_id: string | null;
   drive_uploaded_at: number | null;
   drive_status: NonNullable<MediaItem["driveStatus"]> | null;
+  content_fingerprint: string | null;
 }
 const columns = `id, download_id, title, source_url, source_type, local_path, normalized_path,
   thumbnail_path, duration, width, height, resolution, container, video_codec, audio_codec,
   bitrate, file_size, modified_at, created_at, updated_at, local_available, drive_available,
-  drive_file_id, drive_account_id, drive_uploaded_at, drive_status`;
+  drive_file_id, drive_account_id, drive_uploaded_at, drive_status, content_fingerprint`;
 const names = columns.split(",").map((name) => name.trim());
 const upsert = `INSERT INTO media (${columns}) VALUES (${names.map((name) => `@${name}`).join(", ")})
   ON CONFLICT(id) DO UPDATE SET ${names
@@ -77,6 +78,7 @@ function encode(item: MediaItem): MediaRow {
     drive_account_id: item.driveAccountId ?? null,
     drive_uploaded_at: item.driveUploadedAt ?? null,
     drive_status: item.driveStatus ?? null,
+    content_fingerprint: item.contentFingerprint ?? null,
   };
 }
 function decode(row: MediaRow): MediaItem {
@@ -113,6 +115,7 @@ function decode(row: MediaRow): MediaItem {
   if (row.drive_account_id !== null) item.driveAccountId = row.drive_account_id;
   if (row.drive_uploaded_at !== null) item.driveUploadedAt = row.drive_uploaded_at;
   if (row.drive_status !== null) item.driveStatus = row.drive_status;
+  if (row.content_fingerprint !== null) item.contentFingerprint = row.content_fingerprint;
   return item;
 }
 
@@ -151,6 +154,17 @@ export class MediaRepository {
   save(item: MediaItem): MediaItem {
     this.database.query((connection) => connection.prepare<MediaRow>(upsert).run(encode(item)));
     return item;
+  }
+
+  findFingerprint(size: number, fingerprint: string): MediaItem[] {
+    return this.database.query((connection) =>
+      connection
+        .prepare<[number, string], MediaRow>(
+          `SELECT ${columns} FROM media WHERE file_size = ? AND content_fingerprint = ? AND local_available = 1`,
+        )
+        .all(size, fingerprint)
+        .map(decode),
+    );
   }
 
   remove(id: string): boolean {

@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertFreeSpace,
+  assertAtomicPublication,
   confinedPath,
   publishFile,
   sanitizeFilename,
@@ -15,6 +16,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 describe("safe download files", () => {
+  it("checks atomic-link support without retaining probe files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mv-files-"));
+    roots.push(root);
+    await assertAtomicPublication(root);
+    expect(await readdir(root)).toEqual([]);
+  });
   it("sanitizes Windows names, traversal and reserved device basenames", () => {
     for (const input of ["CON", "con.txt", "COM1", "LPT9.avi", "NUL.", "AUX ", "COM¹", "LPT³.mp4"])
       expect(sanitizeFilename(input)).toMatch(/^_/);

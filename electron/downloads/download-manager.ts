@@ -38,6 +38,7 @@ interface Dependencies {
   settings: DownloadSettingsService;
   activity: ActivityService;
   executor: DownloadExecutor;
+  isOnline?(): boolean;
   prepareMedia(job: DownloadJob, file: DownloadedFile, signal: AbortSignal): Promise<MediaItem>;
   onLibraryChanged(): void;
   onCompleted?(item: MediaItem): void | Promise<void>;
@@ -63,6 +64,9 @@ const safeErrors: ErrorCode[] = [
   "invalidUrl",
   "databaseFailed",
   "unsupportedFormat",
+  "networkUnavailable",
+  "browserSessionRequired",
+  "publicationUnavailable",
 ];
 export class DownloadManager {
   private readonly jobs = new Map<string, DownloadJob>();
@@ -132,6 +136,7 @@ export class DownloadManager {
       updatedAt: now,
       attempts: 0,
       fromAnalysis: candidate.origin === "analysis",
+      ...(candidate.requiresBrowserSession ? { requiresBrowserSession: true } : {}),
       ...(candidate.formatId
         ? { formatId: candidate.formatId, formatLabel: candidate.formatId }
         : {}),
@@ -192,7 +197,7 @@ export class DownloadManager {
       delete job.eta;
     }
     this.dirty.add(job.id);
-    if (statusChanged || value.outputPath) this.save(job);
+    if (statusChanged || value.outputPath || value.requiresBrowserSession) this.save(job);
     if (!this.progressTimer) this.progressTimer = setTimeout(() => this.flush(), 200);
     this.events.notify();
   }
@@ -207,6 +212,8 @@ export class DownloadManager {
   }
   private async run(job: DownloadJob, active: Active): Promise<void> {
     try {
+      if (this.deps.isOnline?.() === false && !job.outputPath)
+        throw new Error("networkUnavailable");
       job.status = "analyzing";
       job.startedAt ??= Date.now();
       job.attempts++;
@@ -269,7 +276,8 @@ export class DownloadManager {
         job.status = active.intent;
         delete job.error;
       } else {
-        job.status = "failed";
+        job.status =
+          code === "networkUnavailable" || code === "browserSessionRequired" ? "paused" : "failed";
         job.error = code;
       }
       this.save(job);
@@ -300,7 +308,7 @@ export class DownloadManager {
     const job = this.job(id),
       active = this.active.get(id);
     if (active) {
-      active.intent = intent;
+      if (active.intent !== "cancelled") active.intent = intent;
       active.controller.abort();
       await active.done;
       return;
@@ -350,11 +358,15 @@ export class DownloadManager {
   async pauseAll(): Promise<void> {
     this.queueHolds++;
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         [...this.jobs.values()]
           .filter((job) => job.status === "queued" || activeStatuses.has(job.status))
           .map((job) => this.pause(job.id)),
       );
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
     } finally {
       this.queueHolds--;
       this.schedule();

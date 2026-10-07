@@ -419,11 +419,14 @@ export class GoogleDriveService {
     try {
       const handle = await open(input.filePath, "r");
       try {
-        const before = await handle.stat();
+        const before = await handle.stat({ bigint: true });
+        // Persisted metadata uses millisecond numbers; file identity must retain
+        // all bits of Windows file IDs and nanosecond timestamps.
+        const modifiedAt = Number(before.mtimeMs) + Number(before.mtimeNs % 1_000_000n) / 1_000_000;
         if (
           !before.isFile() ||
-          before.size !== input.fileSize ||
-          before.mtimeMs !== input.modifiedAt
+          before.size !== BigInt(input.fileSize) ||
+          modifiedAt !== input.modifiedAt
         )
           throw new DriveRequestError("fileChanged", false);
         const response = await this.request(
@@ -441,13 +444,13 @@ export class GoogleDriveService {
           }),
           signal,
         );
-        const after = await handle.stat();
-        const current = await stat(input.filePath);
+        const after = await handle.stat({ bigint: true });
+        const current = await stat(input.filePath, { bigint: true });
         if (
           after.size !== before.size ||
-          after.mtimeMs !== before.mtimeMs ||
+          after.mtimeNs !== before.mtimeNs ||
           current.size !== before.size ||
-          current.mtimeMs !== before.mtimeMs ||
+          current.mtimeNs !== before.mtimeNs ||
           current.ino !== before.ino ||
           current.dev !== before.dev
         )

@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Activity,
   ChevronsLeft,
@@ -25,6 +25,12 @@ import { useDesktopDrive } from "@/hooks/use-desktop-drive";
 import { hasLocalFile, runningUploadStatuses } from "@/lib/drive-display";
 import { formatBytes } from "@/lib/media-display";
 import { useDesktopWindow } from "@/hooks/use-desktop";
+import {
+  useDesktopProduct,
+  useProductAppearance,
+  useProductVersion,
+} from "@/hooks/use-desktop-product";
+import { FirstRunWizard } from "./FirstRunWizard";
 import type { ErrorCode, Result } from "../../../shared/models";
 
 const mainNav = [
@@ -63,6 +69,17 @@ export function LangSwitch() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { t, lang } = useT();
+  const product = useDesktopProduct();
+  const version = useProductVersion();
+  const navigate = useNavigate();
+  useProductAppearance(product.settings?.theme ?? "dark");
+  useEffect(
+    () =>
+      product.api?.product.onNavigate((route) => {
+        void navigate({ to: route });
+      }),
+    [product.api, navigate],
+  );
   const { items: jobs } = useDesktopDownloads();
   const { items: media } = useDesktopLibrary();
   const { state: drive } = useDesktopDrive();
@@ -149,8 +166,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="app-no-drag ml-auto flex items-center gap-3 pr-2">
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <Monitor className="size-3.5 text-primary" />
-            {controlError || error
-              ? t(`desktop.errors.${controlError ?? error}`)
+            {controlError || error || product.error
+              ? t(`desktop.errors.${controlError ?? error ?? product.error}`)
               : t(api ? "desktop.mode" : "desktop.preview")}
           </span>
           <LangSwitch />
@@ -254,8 +271,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           {t(drive.account.connected ? "status.connected" : "drive.notConnected")}
         </span>
 
-        <span className="ml-auto">{t("statusbar.version")}: v0.1.0</span>
+        <span className="ml-auto">
+          {t("statusbar.version")}: {version ?? t("desktop.unknown")}
+        </span>
       </footer>
+      <FirstRunWizard product={product} />
     </div>
   );
 }

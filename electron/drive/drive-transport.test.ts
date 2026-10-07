@@ -10,6 +10,30 @@ import {
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("node:https", () => ({ request: mocks.request }));
 describe("Google HTTP boundary", () => {
+  it("maps a disconnected socket to a resumable network pause without automatic retry", async () => {
+    let outgoing: PassThrough | undefined;
+    mocks.request.mockImplementation(() => {
+      outgoing = new PassThrough();
+      Object.assign(outgoing, { setTimeout: () => outgoing });
+      outgoing.resume();
+      return outgoing;
+    });
+    const body = new PassThrough();
+    const pending = new GoogleHttpsTransport().request({
+      url: "https://www.googleapis.com/drive/v3/files",
+      method: "POST",
+      body,
+    });
+    outgoing!.emit(
+      "error",
+      Object.assign(new Error("private socket details"), { code: "ENETUNREACH" }),
+    );
+    await expect(pending).rejects.toMatchObject({
+      message: "networkUnavailable",
+      retryable: false,
+    });
+    expect(body.destroyed).toBe(true);
+  });
   it("rejects credentials, redirects to other hosts and non-Google session endpoints", () => {
     for (const url of [
       "http://www.googleapis.com/drive/v3/files",

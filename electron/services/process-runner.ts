@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { ErrorCode } from "../../shared/models";
 import { terminateProcessTree } from "./binary-service";
+import { classifyProcessFailure } from "./process-failure";
 
 export interface ManagedProcessOptions {
   timeout: number;
@@ -69,14 +70,14 @@ export function runManagedProcess(
       pending = "";
       diagnosticTail = Buffer.alloc(0);
     }
-    function fail(code: ErrorCode, kill = false) {
+    function fail(code: ErrorCode | Error, kill = false) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
       const finish = () => {
         cleanup();
-        reject(new Error(code));
+        reject(code instanceof Error ? code : new Error(code));
       };
       if (kill) void terminateProcessTree(child).then(finish, finish);
       else finish();
@@ -134,13 +135,7 @@ export function runManagedProcess(
       if (settled) return;
       if (code !== 0) {
         const diagnostic = diagnosticTail.toString("utf8");
-        fail(
-          /\bENOSPC\b|no space left on device|not enough space on (?:the )?disk/i.test(diagnostic)
-            ? "insufficientSpace"
-            : /\bDRM\b|digital rights management/i.test(diagnostic)
-              ? "drmProtected"
-              : failureCode,
-        );
+        fail(classifyProcessFailure(diagnostic, failureCode));
         return;
       }
       if (options.onStdoutLine) {

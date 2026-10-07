@@ -25,6 +25,7 @@ interface Dependencies {
   account(): DriveAccount;
   library: { get(id: string): MediaItem; validateKnownFile(id: string): Promise<string> };
   executor: UploadExecutor;
+  isOnline?(): boolean;
   onLibraryChanged(): void;
   onCompleted?(job: StoredDriveUpload, item: MediaItem): void | Promise<void>;
   logError?(id: string, code: ErrorCode): void;
@@ -383,6 +384,7 @@ export class UploadManager {
     let remoteComplete = false;
     try {
       this.account(job.providerAccountId);
+      if (this.deps.isOnline?.() === false) throw new Error("networkUnavailable");
       job.status = "preparing";
       job.startedAt ??= Date.now();
       job.attempts++;
@@ -411,8 +413,12 @@ export class UploadManager {
         delete job.error;
         if (active.intent === "cancelled") delete job.sessionEncrypted;
       } else {
-        job.status = remoteComplete ? "finalizing" : "failed";
         job.error = uploadError(error);
+        job.status = remoteComplete
+          ? "finalizing"
+          : job.error === "networkUnavailable"
+            ? "paused"
+            : "failed";
         this.deps.logError?.(job.id, job.error);
       }
       this.persist(job);
@@ -481,11 +487,15 @@ export class UploadManager {
   async pauseAll(): Promise<void> {
     this.holds++;
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         [...this.jobs.values()]
           .filter((job) => working.has(job.status) || this.active.has(job.id))
           .map((job) => this.pause(job.id)),
       );
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
     } finally {
       this.holds--;
       this.schedule();
@@ -580,8 +590,14 @@ export class UploadManager {
     });
     return this.reconcileWork;
   }
-  async shutdown(): Promise<void> {
-    if (this.closing) return;
+  private shutdownWork: Promise<void> | undefined;
+  shutdown(): Promise<void> {
+    return (this.shutdownWork ??= this.drain().catch((error: unknown) => {
+      this.shutdownWork = undefined;
+      throw error;
+    }));
+  }
+  private async drain(): Promise<void> {
     this.closing = true;
     this.reconcileController.abort();
     await this.suspend();

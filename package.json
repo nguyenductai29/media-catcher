@@ -1,8 +1,18 @@
 {
   "name": "mediavault",
+  "productName": "MediaVault",
+  "description": "Windows media browser, local library and Google Drive backup",
+  "author": "nguyenductai29",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nguyenductai29/media-catcher.git"
+  },
   "version": "0.1.0",
   "main": "dist-electron/main.cjs",
   "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "sideEffects": false,
   "type": "module",
   "scripts": {
@@ -16,6 +26,14 @@
     "setup:ytdlp": "node scripts/setup-ytdlp.mjs",
     "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
     "test:desktop": "npm run build:desktop && node scripts/smoke-electron.mjs",
+    "package:dir": "npm run build:desktop && node scripts/prepare-packaging.mjs && electron-builder --config electron-builder.cjs --win --x64 --dir --publish never",
+    "package:win": "npm run build:desktop && node scripts/prepare-packaging.mjs && electron-builder --config electron-builder.cjs --win nsis --x64 --publish never",
+    "test:packaging": "node --test scripts/prepare-packaging.test.mjs",
+    "test:packaged": "node scripts/smoke-packaged.mjs",
+    "test:installer": "node scripts/test-installer.mjs",
+    "fixtures:generate": "node scripts/generate-fixtures.mjs",
+    "fixtures:serve": "node scripts/serve-fixtures.mjs",
+    "test:fixtures": "node --test scripts/fixtures.test.mjs",
     "test:drive:manual": "node scripts/test-drive-manual.mjs",
     "test:binary-setup": "node --test electron/services/setup-ytdlp.test.mjs electron/services/setup-ffmpeg.test.mjs",
     "build:dev": "vite build --mode development",
@@ -68,6 +86,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
+    "electron-updater": "6.8.9",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
@@ -97,6 +116,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.6.0",
+    "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",

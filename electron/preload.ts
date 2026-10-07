@@ -7,6 +7,8 @@ import type {
   MediaItem,
   WindowState,
   DriveSnapshot,
+  ProductSettings,
+  ProductRoute,
 } from "../shared/models";
 
 function subscribe<T>(channel: string, listener: (state: T) => void) {
@@ -15,10 +17,33 @@ function subscribe<T>(channel: string, listener: (state: T) => void) {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 const api: MediaVaultAPI = {
+  maintenance: {
+    get: () => ipcRenderer.invoke("maintenance:get"),
+    checkYtDlp: () => ipcRenderer.invoke("maintenance:checkYtDlp"),
+    updateYtDlp: () => ipcRenderer.invoke("maintenance:updateYtDlp"),
+    checkApp: () => ipcRenderer.invoke("maintenance:checkApp"),
+    downloadApp: () => ipcRenderer.invoke("maintenance:downloadApp"),
+    installApp: () => ipcRenderer.invoke("maintenance:installApp"),
+  },
+  diagnostics: {
+    get: () => ipcRenderer.invoke("diagnostics:get"),
+    logs: (filter) => ipcRenderer.invoke("diagnostics:logs", filter),
+    copyLog: (id) => ipcRenderer.invoke("diagnostics:copyLog", id),
+    openLogs: () => ipcRenderer.invoke("diagnostics:openLogs"),
+    clearLogs: () => ipcRenderer.invoke("diagnostics:clearLogs"),
+    exportDiagnostics: () => ipcRenderer.invoke("diagnostics:export"),
+  },
+  storage: {
+    get: () => ipcRenderer.invoke("storage:get"),
+    clean: (action) => ipcRenderer.invoke("storage:clean", action),
+    setFingerprintEnabled: (enabled) =>
+      ipcRenderer.invoke("storage:setFingerprintEnabled", enabled),
+  },
   window: {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     maximize: () => ipcRenderer.invoke("window:maximize"),
     close: () => ipcRenderer.invoke("window:close"),
+    exit: () => ipcRenderer.invoke("window:exit"),
     getState: () => ipcRenderer.invoke("window:state"),
     onState: (listener) => subscribe<WindowState>("window:changed", listener),
   },
@@ -44,6 +69,14 @@ const api: MediaVaultAPI = {
     setLanguage: (language) => ipcRenderer.invoke("settings:setLanguage", language),
     getDrive: () => ipcRenderer.invoke("settings:getDrive"),
     updateDrive: (settings) => ipcRenderer.invoke("settings:updateDrive", settings),
+    getProduct: () => ipcRenderer.invoke("settings:getProduct"),
+    updateProduct: (settings) => ipcRenderer.invoke("settings:updateProduct", settings),
+    completeFirstLaunch: () => ipcRenderer.invoke("settings:completeFirstLaunch"),
+  },
+  product: {
+    getVersion: () => ipcRenderer.invoke("product:getVersion"),
+    onChanged: (listener) => subscribe<ProductSettings>("product:changed", listener),
+    onNavigate: (listener) => subscribe<ProductRoute>("product:navigate", listener),
   },
   binaries: {
     status: () => ipcRenderer.invoke("binaries:status"),

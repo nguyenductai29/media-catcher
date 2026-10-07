@@ -9,6 +9,8 @@ import {
   type DownloadProgress,
 } from "./download-progress";
 import { validateOwnedFile } from "./download-files";
+import type { BrowserCookieBridge, CookieOperation } from "../browser/browser-cookie-bridge";
+import { ProcessFailure } from "../services/process-failure";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -155,7 +157,10 @@ export function parseYtDlpMetadata(value: unknown, sourceUrl: string): PageAnaly
 }
 
 export class YtDlpService {
-  constructor(private readonly binaryService: BinaryService) {}
+  constructor(
+    private readonly binaryService: BinaryService,
+    private readonly cookies?: BrowserCookieBridge,
+  ) {}
 
   async download(
     job: DownloadJob,
@@ -163,38 +168,121 @@ export class YtDlpService {
     onProgress: (progress: DownloadProgress) => void,
     signal: AbortSignal,
   ): Promise<string> {
-    const binary = await this.binaryService.getYtDlpPath();
+    if (job.requiresBrowserSession && (!this.cookies || !job.pageUrl))
+      throw new Error("browserSessionRequired");
+    return this.binaryService.withYtDlp(
+      (binary) => this.downloadUsing(binary, job, tempDirectory, onProgress, signal),
+      signal,
+    );
+  }
+
+  private async downloadUsing(
+    binary: string,
+    job: DownloadJob,
+    tempDirectory: string,
+    onProgress: (progress: DownloadProgress) => void,
+    signal: AbortSignal,
+  ): Promise<string> {
     const ffmpeg = await this.binaryService.getFFmpegPath();
     await this.binaryService.getFFprobePath();
     let outputPath: string | undefined;
-    await runManagedProcess(binary, buildDownloadArgs(job, tempDirectory, ffmpeg), {
-      timeout: 24 * 60 * 60 * 1000,
-      maxStdout: 64 * 1024,
-      maxStderr: 64 * 1024,
-      signal,
-      failureCode: "downloadFailed",
-      timeoutCode: "downloadFailed",
-      onStdoutLine: (line) => {
-        const progress = parseDownloadProgress(line);
-        if (progress) onProgress(progress);
-        if (line.startsWith("MV_COMPLETE:")) {
-          try {
-            const value: unknown = JSON.parse(line.slice(12));
-            if (typeof value === "string" && value.length < 4096) outputPath = value;
-          } catch {
-            /* Untrusted output never becomes a filesystem path. */
-          }
-        }
-      },
-    });
+    const run = async (auth: CookieOperation) => {
+      const args = buildDownloadArgs(job, tempDirectory, ffmpeg);
+      if (auth.cookieFile) {
+        args.splice(args.length - 2, 0, "--cookies", auth.cookieFile);
+        onProgress({ status: "analyzing", requiresBrowserSession: true });
+        this.cookies?.event("authDownloadUsed");
+      }
+      try {
+        await runManagedProcess(binary, args, {
+          timeout: 24 * 60 * 60 * 1000,
+          maxStdout: 64 * 1024,
+          maxStderr: 64 * 1024,
+          signal: auth.signal,
+          failureCode: "downloadFailed",
+          timeoutCode: "downloadFailed",
+          onStdoutLine: (line) => {
+            const progress = parseDownloadProgress(line);
+            if (progress) onProgress(progress);
+            if (line.startsWith("MV_COMPLETE:")) {
+              try {
+                const value: unknown = JSON.parse(line.slice(12));
+                if (typeof value === "string" && value.length < 4096) outputPath = value;
+              } catch {
+                /* Untrusted output never becomes a filesystem path. */
+              }
+            }
+          },
+        });
+      } catch (error) {
+        if (error instanceof ProcessFailure && error.authenticationRequired)
+          throw new Error("browserSessionRequired");
+        throw error;
+      }
+    };
+    if (this.cookies && job.pageUrl)
+      await this.cookies.withCookies(
+        {
+          pageUrl: job.pageUrl,
+          required: job.requiresBrowserSession === true,
+          mode: job.requiresBrowserSession ? "savedJob" : "currentPage",
+        },
+        signal,
+        run,
+      );
+    else await run({ signal });
     if (!outputPath) throw new Error("downloadFailed");
     return validateOwnedFile(tempDirectory, outputPath);
   }
 
   async analyze(url: string, signal?: AbortSignal): Promise<PageAnalysis> {
     if (!webUrl(url)) throw new Error("invalidUrl");
+    return this.binaryService.withYtDlp((binary) => this.analyzeUsing(binary, url, signal), signal);
+  }
+
+  private async analyzeUsing(
+    binary: string,
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<PageAnalysis> {
+    try {
+      return await this.analyzeOnce(binary, url, signal);
+    } catch (error) {
+      if (!(error instanceof ProcessFailure) || !error.authenticationRequired || !this.cookies)
+        throw error;
+      return this.cookies.withCookies(
+        { pageUrl: url, required: true, mode: "currentPage" },
+        signal,
+        async (auth) => {
+          if (!auth.cookieFile) throw new Error("browserSessionRequired");
+          this.cookies!.event("authAnalysisRetry");
+          try {
+            const result = await this.analyzeOnce(binary, url, auth.signal, auth.cookieFile);
+            return {
+              ...result,
+              formats: result.formats.map((format) => ({
+                ...format,
+                requiresBrowserSession: true,
+              })),
+            };
+          } catch (retryError) {
+            if (retryError instanceof ProcessFailure && retryError.authenticationRequired)
+              throw new Error("browserSessionRequired");
+            throw retryError;
+          }
+        },
+      );
+    }
+  }
+
+  private async analyzeOnce(
+    binary: string,
+    url: string,
+    signal?: AbortSignal,
+    cookieFile?: string,
+  ): Promise<PageAnalysis> {
+    if (!webUrl(url)) throw new Error("invalidUrl");
     if (signal?.aborted) throw new Error("cancelled");
-    const binary = await this.binaryService.getYtDlpPath();
     const output = await runYtDlpProcess(
       binary,
       [
@@ -207,6 +295,7 @@ export class YtDlpService {
         "--no-cache-dir",
         "--socket-timeout",
         "15",
+        ...(cookieFile ? ["--cookies", cookieFile] : []),
         "--",
         url,
       ],

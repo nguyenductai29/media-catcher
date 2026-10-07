@@ -95,6 +95,7 @@ describe("SQLite repositories", () => {
       updatedAt: 12,
       attempts: 2,
       fromAnalysis: true,
+      requiresBrowserSession: true,
       error: "downloadFailed",
     };
     downloads.save(complete);

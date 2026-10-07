@@ -16,6 +16,7 @@ export interface LocalMediaServices {
   activity: ActivityService;
   logger?: LocalLogger;
   guardMedia?<T>(id: string, action: () => T | Promise<T>): Promise<T>;
+  onLanguageChanged?(): void;
 }
 export type RegisterHandler = (channel: string, action: (...args: unknown[]) => unknown) => void;
 export function checkedId(value: unknown): string {
@@ -53,7 +54,10 @@ export function registerLocalMediaIPC(
     downloads.settingsChanged();
     return value;
   });
-  handle("settings:setLanguage", (language) => downloadSettings.setLanguage(language));
+  handle("settings:setLanguage", (language) => {
+    downloadSettings.setLanguage(language);
+    services.onLanguageChanged?.();
+  });
   handle("downloads:list", () => downloads.list());
   handle("downloads:add", (input) => {
     if (

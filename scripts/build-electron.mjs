@@ -7,6 +7,6 @@ await build({
   platform: "node",
   format: "cjs",
   target: "node22",
-  external: ["electron", "better-sqlite3"],
+  external: ["electron", "better-sqlite3", "electron-updater"],
   sourcemap: true,
 });

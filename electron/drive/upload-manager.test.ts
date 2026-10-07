@@ -55,6 +55,7 @@ describe("durable Drive upload queue", () => {
   let directory: string, db: SqliteDatabase, media: MediaRepository, uploads: DriveUploadRepository;
   let settings: DriveSettingsService, activity: ActivityService, manager: UploadManager;
   let account: DriveAccount;
+  let online = true;
   const running = new Map<string, { resolve(): void; reject(error: Error): void }>();
   let started: string[], checkpointed: string[];
   let completed: ReturnType<
@@ -79,10 +80,12 @@ describe("durable Drive upload queue", () => {
         validateKnownFile: validate,
       },
       executor,
+      isOnline: () => online,
       onLibraryChanged: vi.fn(),
       onCompleted: completed,
     });
   beforeEach(async () => {
+    online = true;
     directory = await mkdtemp(join(tmpdir(), "mv-upload-manager-"));
     db = new SqliteDatabase(directory);
     media = new MediaRepository(db);
@@ -139,6 +142,25 @@ describe("durable Drive upload queue", () => {
     media.save(item(id));
     return manager.add(id);
   }
+
+  it("pauses offline uploads without a worker and keeps resumable checkpoints on network failure", async () => {
+    online = false;
+    const job = await add("offline");
+    await until(() => manager.get(job.id).status === "paused");
+    expect(manager.get(job.id).error).toBe("networkUnavailable");
+    expect(started).toHaveLength(0);
+    online = true;
+    manager.resume(job.id);
+    await until(() => started.length === 1);
+    running.get(job.id)!.reject(new Error("networkUnavailable"));
+    await until(() => manager.get(job.id).status === "paused");
+    expect(uploads.get(job.id)).toMatchObject({
+      error: "networkUnavailable",
+      sessionEncrypted: "encrypted-fixture",
+      plannedFileId: `remote-${job.id}`,
+    });
+    expect(started).toHaveLength(1);
+  });
 
   it("runs two workers, persists progress, and lets queued work proceed after failure", async () => {
     const a = await add("a"),

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import type { ComponentType } from "react";
 import type { BrowserSettings, DownloadSettings } from "../../shared/models";
@@ -31,7 +31,8 @@ it("loads and saves browser session settings through the desktop bridge", async 
   fireEvent.change(homepage, { target: { value: "https://new.example/" } });
   fireEvent.click(screen.getByRole("switch", { name: "Save browser session" }));
   fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Browser settings saved");
+  const browser = within(screen.getByRole("heading", { name: "Browser" }).closest("section")!);
+  expect(await browser.findByRole("status")).toHaveTextContent("Browser settings saved");
   expect(saved).toEqual({ version: 1, homepage: "https://new.example/", saveSession: false });
 });
 
@@ -81,7 +82,8 @@ it("saves download preferences with an approved native directory and shows all m
     container: "mp4",
     autoRetry: true,
   });
-  expect(screen.getByText("yt-dlp")).toBeInTheDocument();
-  expect(screen.getByText("FFmpeg")).toBeInTheDocument();
-  expect(screen.getByText("ffprobe")).toBeInTheDocument();
+  const tools = within(screen.getByRole("heading", { name: "Media tools" }).closest("section")!);
+  expect(tools.getByText("yt-dlp")).toBeInTheDocument();
+  expect(tools.getByText("FFmpeg")).toBeInTheDocument();
+  expect(tools.getByText("ffprobe")).toBeInTheDocument();
 });

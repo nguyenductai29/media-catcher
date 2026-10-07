@@ -25,7 +25,7 @@ describe("Drive schema v2 upgrade", () => {
     try {
       const oldDownload = db.prepare("SELECT * FROM downloads").get();
       const oldActivity = db.prepare("SELECT * FROM activity_logs").get();
-      applyMigrations(db);
+      applyMigrations(db, migrations.slice(0, 2));
       expect(db.pragma("user_version", { simple: true })).toBe(2);
       expect(db.prepare("SELECT * FROM downloads").get()).toEqual(oldDownload);
       expect(db.prepare("SELECT * FROM activity_logs").get()).toEqual(oldActivity);
@@ -47,7 +47,7 @@ describe("Drive schema v2 upgrade", () => {
         drive_status: null,
       });
       expect(db.pragma("foreign_key_check")).toEqual([]);
-      applyMigrations(db);
+      applyMigrations(db, migrations.slice(0, 2));
       expect(db.prepare("SELECT count(*) AS n FROM activity_logs").get()).toEqual({ n: 1 });
       for (const type of [
         "driveConnected",

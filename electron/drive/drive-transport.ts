@@ -105,8 +105,8 @@ export class GoogleHttpsTransport implements DriveTransport {
           }
           chunks.push(chunk);
         });
-        incoming.on("error", () => fail(new DriveRequestError("driveUnavailable", true)));
-        incoming.on("aborted", () => fail(new DriveRequestError("driveUnavailable", true)));
+        incoming.on("error", () => fail(new DriveRequestError("networkUnavailable", false)));
+        incoming.on("aborted", () => fail(new DriveRequestError("networkUnavailable", false)));
         incoming.on("end", () => {
           if (settled) return;
           settled = true;
@@ -124,10 +124,10 @@ export class GoogleHttpsTransport implements DriveTransport {
           });
         });
       });
-      req.on("error", () => fail(new DriveRequestError("driveUnavailable", true)));
-      req.setTimeout(30_000, () => fail(new DriveRequestError("driveUnavailable", true)));
+      req.on("error", () => fail(new DriveRequestError("networkUnavailable", false)));
+      req.setTimeout(30_000, () => fail(new DriveRequestError("networkUnavailable", false)));
       const deadline = setTimeout(
-        () => fail(new DriveRequestError("driveUnavailable", true)),
+        () => fail(new DriveRequestError("networkUnavailable", false)),
         Math.min(input.timeoutMs ?? 60_000, 10 * 60_000),
       );
       input.signal?.addEventListener("abort", abort, { once: true });

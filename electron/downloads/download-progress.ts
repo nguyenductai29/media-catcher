@@ -8,6 +8,8 @@ export interface DownloadProgress {
   speed?: number;
   eta?: number;
   outputPath?: string;
+  /** Main-only checkpoint before an authenticated child process starts. */
+  requiresBrowserSession?: true;
 }
 const nonnegative = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -75,6 +77,7 @@ export function buildDownloadArgs(
     "after_move:MV_COMPLETE:%(filepath)j",
     "--continue",
     "--no-overwrites",
+    "--keep-video",
     "--no-mtime",
     "--windows-filenames",
     "--socket-timeout",

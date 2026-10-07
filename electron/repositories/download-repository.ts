@@ -28,10 +28,11 @@ interface DownloadRow {
   error: NonNullable<DownloadJob["error"]> | null;
   attempts: number;
   from_analysis: number;
+  requires_browser_session: number;
 }
 const columns = `id, source_url, page_url, title, thumbnail, format_id, format_label, resolution,
   container, quality, destination_directory, output_path, media_id, downloaded_bytes, total_bytes,
-  progress, speed, eta, status, created_at, updated_at, started_at, completed_at, error, attempts, from_analysis`;
+  progress, speed, eta, status, created_at, updated_at, started_at, completed_at, error, attempts, from_analysis, requires_browser_session`;
 // Identifiers are application-owned constants; all values use named bindings.
 const names = columns.split(",").map((name) => name.trim());
 const upsert = `INSERT INTO downloads (${columns}) VALUES (${names.map((name) => `@${name}`).join(", ")})
@@ -68,6 +69,7 @@ function encode(job: DownloadJob): DownloadRow {
     error: job.error ?? null,
     attempts: job.attempts,
     from_analysis: job.fromAnalysis ? 1 : 0,
+    requires_browser_session: job.requiresBrowserSession ? 1 : 0,
   };
 }
 function decode(row: DownloadRow): DownloadJob {
@@ -99,6 +101,7 @@ function decode(row: DownloadRow): DownloadJob {
   if (row.started_at !== null) job.startedAt = row.started_at;
   if (row.completed_at !== null) job.completedAt = row.completed_at;
   if (row.error !== null) job.error = row.error;
+  if (row.requires_browser_session === 1) job.requiresBrowserSession = true;
   return job;
 }
 

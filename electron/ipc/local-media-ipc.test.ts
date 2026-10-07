@@ -7,6 +7,7 @@ import type { SettingsService } from "../services/settings-service";
 import type { BinaryService } from "../services/binary-service";
 import type { LocalMediaServices } from "./register-local-media-ipc";
 import type { DriveIPCServices } from "./register-drive-ipc";
+import type { ProductIPCServices } from "./register-product-ipc";
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>>(),
   confirm: vi.fn(),
@@ -75,6 +76,13 @@ function setup() {
     events,
   };
   const candidate = { id: "network-id", url: "https://real.example/media.mp4", origin: "network" };
+  const product = {
+    settings: { get: vi.fn(), update: vi.fn(), completeFirstLaunch: vi.fn(), events },
+    version: () => "0.1.0",
+    exit: vi.fn(),
+    isExiting: vi.fn(() => false),
+  };
+  const storage = { get: vi.fn(), clean: vi.fn(), setFingerprintEnabled: vi.fn() };
   const dispose = registerIPC(
     window,
     { getState: () => ({ media: [candidate] }) } as unknown as BrowserManager,
@@ -83,13 +91,58 @@ function setup() {
     "mediavault://app",
     services as unknown as LocalMediaServices,
     drive as unknown as DriveIPCServices,
+    product as unknown as ProductIPCServices,
+    storage,
   );
   const trusted = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent;
   const invoke = (channel: string, ...args: unknown[]) =>
     mocks.handlers.get(channel)!(trusted, ...args);
-  return { services, drive, trusted, invoke, dispose, candidate };
+  return { services, drive, product, storage, trusted, invoke, dispose, candidate };
 }
 describe("local-media IPC security and confirmation", () => {
+  it("rejects foreign storage requests and path-shaped cleanup inputs", async () => {
+    const f = setup();
+    for (const channel of ["storage:get", "storage:clean", "storage:setFingerprintEnabled"])
+      expect(
+        await mocks.handlers.get(channel)!({ ...f.trusted, sender: {} } as IpcMainInvokeEvent),
+      ).toEqual({ ok: false, error: "unavailable" });
+    for (const action of ["C:\\Videos", "../Temp", {}, undefined])
+      expect(await f.invoke("storage:clean", action)).toEqual({ ok: false, error: "invalidInput" });
+    expect(await f.invoke("storage:setFingerprintEnabled", "true")).toEqual({
+      ok: false,
+      error: "invalidInput",
+    });
+    expect(f.storage.clean).not.toHaveBeenCalled();
+    await f.invoke("storage:clean", "staleTemp");
+    expect(f.storage.clean).toHaveBeenCalledWith("staleTemp");
+  });
+  it("guards product settings and Exit from foreign frames and rejects new work while draining", async () => {
+    const f = setup();
+    for (const channel of [
+      "settings:getProduct",
+      "settings:updateProduct",
+      "settings:completeFirstLaunch",
+      "product:getVersion",
+      "window:exit",
+    ])
+      expect(
+        await mocks.handlers.get(channel)!({ ...f.trusted, sender: {} } as IpcMainInvokeEvent),
+      ).toEqual({ ok: false, error: "unavailable" });
+    expect(f.product.settings.get).not.toHaveBeenCalled();
+    expect(f.product.settings.completeFirstLaunch).not.toHaveBeenCalled();
+    expect(await f.invoke("product:getVersion")).toEqual({ ok: true, value: "0.1.0" });
+    f.product.isExiting.mockReturnValue(true);
+    expect(await f.invoke("downloads:add", { mediaId: "network-id" })).toEqual({
+      ok: false,
+      error: "unavailable",
+    });
+    expect(await f.invoke("drive:upload", "known")).toEqual({ ok: false, error: "unavailable" });
+    expect(f.services.downloads.add).not.toHaveBeenCalled();
+    expect(f.drive.upload).not.toHaveBeenCalled();
+    expect(await f.invoke("window:exit")).toEqual({ ok: true, value: undefined });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(f.product.exit).toHaveBeenCalledTimes(1);
+  });
   it("rejects foreign renderers and subframes for new APIs", async () => {
     const f = setup();
     for (const event of [

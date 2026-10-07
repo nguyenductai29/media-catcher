@@ -1,188 +1,155 @@
 # MediaVault
 
-Windows-first desktop media browser built on the existing [Lovable project](https://lovable.dev/projects/89c6c254-01ad-440e-a997-49916bb992b0). React, TanStack routes, Tailwind/shadcn design, and English/Vietnamese UI are shared by the web preview and Electron renderer.
+Windows desktop media browser, download manager, local library and Google Drive
+backup app, built on the existing
+[Lovable project](https://lovable.dev/projects/89c6c254-01ad-440e-a997-49916bb992b0).
+React, TanStack routes, Tailwind/shadcn and English/Vietnamese UI are shared with
+the web preview. Electron Main owns native operations, credentials and files.
 
-## Desktop features
+Start with the [Windows setup and test guide](docs/final-setup-and-test.md), then
+use the [final E2E checklist](docs/final-e2e-checklist.md). Local packaged and NSIS
+tests have passed; real Google authorization, an actual Windows reboot and a fresh
+machine remain explicit manual checks.
 
-- Frameless Electron window with working minimize, maximize/restore and close.
-- Real WebContentsView: address entry, back/forward, reload/stop, homepage, title/favicon and bounds that follow the sidebar and page layout.
-- Separate persistent browser session, optional temporary sessions, homepage preference, clear cookies and clear browser data.
-- Live network candidates for video/audio/HLS/DASH, bounded deduplication and segment filtering; scan a page with yt-dlp to see available formats.
-- Typed, sender-validated IPC, sandboxed renderer and remote content, safe HTTP(S) navigation and bounded cancellable child processes.
+The [final phase report](docs/final-phase-report.md) records implementation details,
+changed files, verification evidence and remaining limitations.
 
-- Real yt-dlp downloads with FFmpeg merge/remux, structured progress, concurrency
-  1–5, pause/resume, cancel, retry and persisted queue recovery.
-- SQLite download history, library, activity and download preferences. Completed
-  jobs enter the library only after ffprobe validates the file.
-- Local file/folder imports, metadata and thumbnails, search/sort, grid/list,
-  restricted local playback, reveal in folder, separate remove and confirmed delete.
+## What works
 
-- Google Drive desktop OAuth, encrypted credentials, real quota and a managed
-  MediaVault folder. Streamed resumable uploads with concurrency 1–3, live progress,
-  pause/resume/cancel/retry and persistent recovery.
-- Manual Library uploads and optional auto-upload after a committed download.
-  Verified cloud copies, Drive-only Library records, safe local deletion policies,
-  account-aware metadata sync and Drive activity in English and Vietnamese.
-
-The web preview remains available without desktop capabilities. Installer, tray,
-updater, startup registration and first-run wizard remain future work.
+- Native embedded browser with navigation, persistent/temporary sessions, network
+  media detection and yt-dlp format analysis. Authorized non-DRM analysis/downloads
+  can use narrowly scoped cookies from MediaVault's browser.
+- Real yt-dlp downloads, FFmpeg merge/remux, ffprobe validation, concurrency 1–5,
+  pause/resume/cancel/retry and persisted recovery. Completed files enter Library.
+- Local file/folder imports, metadata, thumbnails, search/sort, playback, reveal,
+  separate remove/delete actions and optional sampled duplicate detection.
+- Google Drive desktop OAuth, real quota and managed folder, streamed resumable
+  uploads with concurrency 1–3, account-aware recovery and manual/automatic upload.
+  Auto-upload defaults off; local deletion defaults to Never.
+- Six-step first-run wizard, tray/background work, explicit Exit, Windows startup
+  setting, themes, EN/VI settings and native dialogs.
+- SQLite schema v3, backups before migrations, explicit corruption recovery,
+  safe storage cleanup, bounded sanitized logs and diagnostic JSON export.
+- Explicit verified yt-dlp updates. Application update controls show an honest
+  unconfigured state by default; a configured build requires a pinned signed publisher.
+- Windows x64 NSIS installer with bundled binaries and native SQLite. Upgrade and
+  uninstall preserve application data and local media.
 
 ## Run on Windows
 
-Use Node.js 22.12+ and npm for development. The standalone yt-dlp executable does not require Python.
+Use Windows x64, Git, and Node.js **22.12 or newer**; Node **22.23.3** was used for
+verification. Use an NTFS/hard-link-capable download destination. Python is not
+required for the standalone yt-dlp executable.
 
 ```powershell
+git clone https://github.com/nguyenductai29/media-catcher.git
+Set-Location .\media-catcher
 npm ci
+$env:MEDIAVAULT_YTDLP_VERSION = '2026.08.19'
+$env:MEDIAVAULT_FFMPEG_VERSION = '9.0.2'
 npm run setup:ytdlp
 npm run setup:ffmpeg
 npm run electron:dev
 ```
 
-`setup:ytdlp` explicitly downloads the official release for the host platform, checks its SHA-256 against the release manifest, and refuses to overwrite an existing executable. Binaries are ignored by Git. The app never downloads or updates them silently. A missing binary still allows browsing/network detection and produces a localized message when scanning.
+These setup versions match the checked-in notice/checksum manifest. Setup is
+explicit and checksum-verified and refuses to replace existing executables.
+Selecting newer tools requires a deliberate manifest/license review before packaging.
+See [binary setup details](resources/bin/README.md) and
+[third-party notices](THIRD-PARTY-NOTICES.md).
 
-`setup:ffmpeg` installs FFmpeg and ffprobe for Windows x64 from the Gyan build
-publisher linked by ffmpeg.org, verifies its SHA-256, extracts only the expected
-executables and refuses to overwrite existing files. See the binary setup details
-below for supported overrides and licensing. Settings reports all three binaries.
+`npm run dev` opens the Lovable web preview. Native functionality is available in
+Electron. Main/preload edits require restarting `electron:dev`; React changes
+refresh normally. F12 opens development renderer tools.
 
-To use an existing trusted development executable:
+## Google Drive configuration
+
+Create a Google Cloud project, enable Drive API, configure the consent screen and
+create an OAuth **Desktop app** client using the
+[step-by-step guide](docs/final-setup-and-test.md#3-configure-google-drive).
+Start MediaVault from the same PowerShell terminal:
 
 ```powershell
-$env:MEDIAVAULT_YTDLP_PATH = 'C:\Tools\yt-dlp.exe'
-$env:MEDIAVAULT_FFMPEG_PATH = 'C:\Tools\ffmpeg.exe'
-$env:MEDIAVAULT_FFPROBE_PATH = 'C:\Tools\ffprobe.exe'
+$env:GOOGLE_CLIENT_ID = 'YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com'
+# Only if supplied/required for your Desktop client:
+$env:GOOGLE_CLIENT_SECRET = 'YOUR_DESKTOP_CLIENT_CREDENTIAL'
 npm run electron:dev
 ```
 
-The override is ignored in a packaged application. Production lookup is `process.resourcesPath/bin/yt-dlp.exe`; future packaging must include it there. F12 toggles renderer DevTools in development. Changes to Electron main/preload require restarting `electron:dev`; React changes refresh normally.
+These are Main-only launch variables; never use a `VITE_` prefix. `.env.local` is
+not loaded automatically. The explicit alternative is
+`node --env-file=.env.local scripts/electron-dev.mjs`. Packaged launches also need
+the configuration in their environment; building does not embed it.
 
-## Build and verify
+Connect through the app and authorize in the system browser. Google tokens are
+encrypted with OS-backed safeStorage; upload sessions are encrypted in SQLite.
+Neither is sent to the renderer. Normal automated tests require no Google account.
+`npm run test:drive:manual` is an interactive, isolated real-account helper; it also
+accepts `--packaged-executable` with the absolute installed/built `.exe` path.
+
+## Build, package and verify
 
 ```powershell
 npm run typecheck
 npm run lint
 npm test
 npm run test:binary-setup
+npm run test:packaging
+npm run test:fixtures
 npm run build
 npm run test:desktop
-npm run electron:start
+npm run package:win
+npm run test:packaged
+npm audit
 ```
 
-`build` verifies both the original Lovable web build (`.output`) and static desktop renderer (`dist-desktop`) plus main/preload (`dist-electron`). The desktop uses a local application protocol and hash routing, with no local HTTP server required after building. `electron:start` launches those built artifacts.
-
-`npm run test:desktop` builds and runs real Electron integration checks using
-local HTTP fixtures and isolated temporary browser/database/media directories.
-It requires a graphical desktop session and the three installed binaries. Phase 2
-uses real locally generated H.264/AAC media to exercise downloading, validation,
-persistence and automatic library updates.
-
-`npm run dev` continues to run the original Lovable web preview. Native browser controls show a desktop-only message in a regular browser. `npm run build:web` and `npm run build:desktop` can be used independently.
-
-## Connect Google Drive
-
-Follow [Google Drive setup](docs/google-drive-setup.md) to create a Google Cloud
-project, enable Drive API, configure Branding/Audience/Data Access, add your test
-account, and create an OAuth **Desktop app** client. Then start Electron from the
-terminal containing your configuration:
+`build` checks the web build and produces `dist-desktop` plus `dist-electron`.
+`electron:start` launches built development artifacts. `package:win` creates
+`release\MediaVault-Setup-0.1.0.exe` and `release\win-unpacked\MediaVault.exe`.
+`package:dir` creates only the unpacked application. Packaging never publishes.
+The [guide](docs/final-setup-and-test.md#8-verify-install-upgrade-and-uninstall)
+includes the actual isolated 0.1.0 → 0.1.1 installer test commands.
 
 ```powershell
-$env:GOOGLE_CLIENT_ID = 'YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com'
-# Optional public desktop credential, if required by your Google client:
-$env:GOOGLE_CLIENT_SECRET = 'YOUR_DESKTOP_CLIENT_CREDENTIAL'
-npm run electron:dev
+npm run fixtures:generate -- --output .\artifacts\fixtures --dash --large-mib 128
+# Substitute the new run directory printed by the generator:
+npm run fixtures:serve -- --directory 'C:\path\to\printed-run-directory' --port 8765
 ```
 
-Open Google Drive → Connect and authorize in the system browser. Configuration
-is read by Electron Main; do not use `VITE_` variables. `.env.example` contains only
-placeholders. To use a local env file, run
-`node --env-file=.env.local scripts/electron-dev.mjs` explicitly.
+Fixtures are generated media only: MP4, HLS, optional DASH, authenticated local
+video, range requests and controllable interruption. No personal files are selected
+or removed. Smoke tests use isolated profiles and actual packaged executables.
 
-OAuth uses a temporary loopback callback, random state and S256 PKCE. Requested
-scopes are `drive.file`, `openid`, `email` and `profile`; full Drive access is not
-requested. Refresh credentials use Electron safeStorage (Windows DPAPI) under
-`%APPDATA%\MediaVault\auth\google-auth.dat`; access tokens remain in Main memory.
-Upload session URLs are encrypted in SQLite. No tokens or upload sessions enter
-the renderer or logs, and unavailable secure storage has no plaintext fallback.
+## Data and release boundaries
 
-MediaVault creates/reuses **My Drive / MediaVault** by saved ID and app-owned
-metadata. Library uploads use that destination and numbered names for collisions.
-Sync Now refreshes quota and known managed file IDs; it does not scan your entire
-Drive. Disconnect keeps files and completed metadata. A different account cannot
-resume previous-account uploads or silently claim their cloud records.
+Default mutable data is under `%APPDATA%\MediaVault`; media/cache directories are
+under the Windows Videos directory in `MediaVault\Downloads`, `Thumbnails` and
+`Temp`. Imports reference their selected file. Remove from Library keeps the file;
+Delete Local File requires confirmation. Resume depends on source support, and
+unfinished work returns paused after restart.
 
-Chunks default to 8 MiB and stream through bounded disk buffers. Pause retains
-the encrypted session; Resume validates size/mtime and queries Google's confirmed
-offset. Restart restores unfinished work as paused, with metadata reconciliation
-for uncertain completions. Expired sessions can restart using the same preallocated
-file ID. Cancel discards its session reference and retains that ID for safe Retry;
-it does not delete local or remote files. Transient requests have at most three
-attempts with backoff. See [Phase 3 architecture and verification](docs/desktop-phase-three.md).
+Supported absolute `--user-data-dir=...` and `--media-videos-dir=...` launch switches
+isolate development or packaged profiles outside the installation. Packaged builds
+ignore development binary/path override environment variables. Local playback uses
+a restricted application protocol; codecs unsupported by Chromium can use the
+controlled default-application action.
 
-**Auto-upload defaults to off. Local deletion defaults to Never.** Auto-upload
-runs only after the local download transaction succeeds. Ask me/Automatically
-delete only after verified Drive metadata, matching size and a committed cloud
-record, followed by another metadata/file-integrity check. Ask does not occupy an
-upload worker. Deletion keeps a Drive-only Library record and thumbnail; local
-playback and reveal actions are disabled for unavailable files.
+Local installers are currently **unsigned**. The compiled public update provider
+is disabled by `resources/update-provider.json` (`{"provider": null}`). Signing and
+a real signed release feed have not been verified. Complete GPL corresponding
+source availability for bundled standalone binaries also remains unverified; read
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) before public redistribution. A
+successful local build is not a public-release readiness claim.
 
-Normal tests and `test:desktop` require no Google credentials. For explicit live
-verification, build the desktop app and run `npm run test:drive:manual` from an
-interactive terminal with your OAuth configuration. It generates a tiny test video
-and opens an isolated profile; you initiate login, uploads and deletion through
-the UI. This helper is not an automated real-Google test.
+DRM bypass, Drive downloads, shared drives, simultaneous accounts and full two-way
+Drive sync are outside scope. Some sites reject embedded browsers or require
+extractor support beyond the current authorized cookie bridge.
 
-## Local data and boundaries
+## Project history
 
-Browser settings and the browser profile live under `%APPDATA%\MediaVault`, separate from application files. Language remains a lightweight renderer preference and is mirrored to SQLite for native dialogs. Turning off Save browser session creates a fresh in-memory session; changing it reloads the page. Data clearing affects only MediaVault's embedded browser, not Chrome/Edge or the application's language preference.
-
-`%APPDATA%\MediaVault\mediavault.db` stores versioned SQLite tables for downloads,
-media, download/Drive settings, upload jobs and activity. Schema v2 preserves v1
-data and adds Drive/account/availability metadata. The database uses WAL, foreign keys and
-transactional migrations. `better-sqlite3` 13 uses bundled Node-API prebuilds; it
-was verified with both the development Node runtime and the installed Electron
-runtime without rebuilding. Electron/SQLite code is excluded from the web renderer.
-
-Media directories are created when needed under `%USERPROFILE%\Videos\MediaVault`:
-`Downloads`, `Thumbnails` and `Temp`. A native picker can select another download
-destination. Existing files are never overwritten; duplicate titles receive
-numbered suffixes. Imports reference the selected local file without copying it.
-Remove from Library leaves the file intact; Delete Local File asks before deleting.
-
-Pause stops the entire worker process tree and preserves job partials. Resume
-queues the same job with `--continue`; actual byte resumption depends on the
-server/extractor. Cancel also retains useful partials for Retry. Completed staging
-files are cleaned after the database commit. On restart, all unfinished jobs become
-paused and require an explicit Resume. Closing with active work asks before pausing
-and shutting down workers. Automatic retry, when enabled, permits one retry for
-transient download failures.
-
-MP4/MKV selection merges/remuxes without full video re-encoding. Audio mode extracts
-the best original audio container. Chromium cannot preview every valid media codec;
-the player offers a controlled default-application action. Technical error codes and
-job IDs are retained in bounded local logs; cookies, headers, signed URLs and raw
-worker output are excluded.
-
-Development integration tests can set absolute `MEDIAVAULT_USER_DATA` and
-`MEDIAVAULT_VIDEOS_DIR` paths to isolate local state. Packaged builds ignore all
-development path overrides.
-
-Clearing data also clears the saved browser profile when a temporary session is
-active, then opens the homepage. The desktop build bundles its interface fonts
-locally so its typography does not depend on a font CDN.
-
-HTTP(S) popups open in the existing embedded view. Unsupported external schemes, unsolicited website downloads, device access, notifications and permissions other than fullscreen are blocked. Some sites restrict embedded-browser login or require extra extractor support. yt-dlp does not receive browser cookies in this milestone; authenticated analysis may therefore fail even after login. DRM circumvention is not supported.
-
-See [Phase 2 design and verification](docs/desktop-phase-two.md),
-[Phase 3 design and verification](docs/desktop-phase-three.md),
-[Google Drive setup](docs/google-drive-setup.md),
-[Phase 1 implementation](docs/desktop-milestone-one.md),
-[binary setup details](resources/bin/README.md),
-[Electron security guidance](https://www.electronjs.org/docs/latest/tutorial/security),
-[better-sqlite3 releases](https://github.com/WiseLibs/better-sqlite3/releases), and
-the [official yt-dlp documentation](https://github.com/yt-dlp/yt-dlp).
-
-Keep connected Git history intact: do not force-push, amend or rebase published commits. Changes on the connected branch sync back to Lovable.
-
-Phase 4 remains unimplemented: installer, tray/background operation, Windows startup,
-auto-updater and first-run wizard. Drive downloads, shared drives, Google Picker,
-simultaneous accounts and full two-way sync also remain outside this phase.
+The [Phase 1](docs/desktop-milestone-one.md),
+[Phase 2](docs/desktop-phase-two.md) and
+[Phase 3](docs/desktop-phase-three.md) documents describe their historical scope;
+the final setup guide describes current behavior. Keep connected Git history
+intact: do not force-push, amend or rebase published commits. Changes on the
+connected branch sync back to Lovable.

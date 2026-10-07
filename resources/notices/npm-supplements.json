@@ -1,0 +1,33 @@
+[
+  {
+    "package": "embla-carousel",
+    "version": "8.6.0",
+    "file": "Embla-Carousel-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/davidjerleke/embla-carousel/v8.6.0/LICENSE"
+  },
+  {
+    "package": "embla-carousel-react",
+    "version": "8.6.0",
+    "file": "Embla-Carousel-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/davidjerleke/embla-carousel/v8.6.0/LICENSE"
+  },
+  {
+    "package": "embla-carousel-reactive-utils",
+    "version": "8.6.0",
+    "file": "Embla-Carousel-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/davidjerleke/embla-carousel/v8.6.0/LICENSE"
+  },
+  {
+    "package": "victory-vendor",
+    "version": "36.9.2",
+    "file": "Victory-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/FormidableLabs/victory/v36.9.2/LICENSE.txt"
+  },
+  {
+    "package": "react-remove-scroll-bar",
+    "version": "2.3.8",
+    "file": "react-remove-scroll-bar-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/theKashey/react-remove-scroll-bar/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE",
+    "note": "The installed 2.3.8 README/package declare MIT but omit the license text; this pinned upstream license file supplies that text. The npm gitHead and a 2.3.8 tag were not available from this repository."
+  }
+]

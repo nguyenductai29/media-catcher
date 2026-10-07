@@ -5,6 +5,10 @@ import type { SettingsService } from "../services/settings-service";
 import type { BinaryService } from "../services/binary-service";
 import { registerLocalMediaIPC, type LocalMediaServices } from "./register-local-media-ipc";
 import { registerDriveIPC, type DriveIPCServices } from "./register-drive-ipc";
+import { registerProductIPC, type ProductIPCServices } from "./register-product-ipc";
+import { registerStorageIPC, type StorageIPCServices } from "./register-storage-ipc";
+import { registerMaintenanceIPC, type MaintenanceIPCServices } from "./register-maintenance-ipc";
+import { registerDiagnosticsIPC, type DiagnosticsIPCServices } from "./register-diagnostics-ipc";
 
 export function validBounds(value: unknown): value is ViewBounds | null {
   if (value === null) return true;
@@ -23,6 +27,10 @@ export function registerIPC(
   trustedOrigin: string,
   localMedia?: LocalMediaServices,
   drive?: DriveIPCServices,
+  product?: ProductIPCServices,
+  storage?: StorageIPCServices,
+  maintenance?: MaintenanceIPCServices,
+  diagnostics?: DiagnosticsIPCServices,
 ) {
   const channels: string[] = [];
   let sessionWork: Promise<unknown> = Promise.resolve();
@@ -50,7 +58,11 @@ export function registerIPC(
   const handle = (channel: string, action: (...args: unknown[]) => unknown) => {
     channels.push(channel);
     ipcMain.handle(channel, async (event, ...args): Promise<Result<unknown>> => {
-      if (!trusted(event)) return { ok: false, error: "unavailable" };
+      if (
+        !trusted(event) ||
+        (product?.isExiting() && channel !== "window:exit" && channel !== "window:close")
+      )
+        return { ok: false, error: "unavailable" };
       try {
         return { ok: true, value: await action(...args) };
       } catch (error) {
@@ -90,6 +102,19 @@ export function registerIPC(
           "driveAlreadyUploaded",
           "driveUnavailable",
           "networkUnavailable",
+          "startupFailed",
+          "startupUnsupported",
+          "productSettingsFailed",
+          "browserSessionRequired",
+          "storageFailed",
+          "databaseRecoveryFailed",
+          "publicationUnavailable",
+          "updateFailed",
+          "updateBusy",
+          "updateNotConfigured",
+          "updateChecksumMismatch",
+          "updateUnsupported",
+          "diagnosticsFailed",
         ];
         const safeCode = allowed.includes(code as ErrorCode) ? (code as ErrorCode) : "unavailable";
         localMedia?.logger?.error("ipc", safeCode);
@@ -142,7 +167,12 @@ export function registerIPC(
     ? registerLocalMediaIPC(window, browser, localMedia, handle)
     : () => {};
   const removeDrive = drive ? registerDriveIPC(window, drive, handle) : () => {};
+  const removeProduct = product ? registerProductIPC(window, product, handle) : () => {};
+  if (storage) registerStorageIPC(storage, handle);
+  if (maintenance) registerMaintenanceIPC(maintenance, handle);
+  if (diagnostics) registerDiagnosticsIPC(diagnostics, handle);
   return () => {
+    removeProduct();
     removeDrive();
     removeLocalMedia();
     channels.forEach((channel) => ipcMain.removeHandler(channel));

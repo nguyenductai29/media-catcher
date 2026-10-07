@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
-import { copyFile, link, lstat, realpath, statfs } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { copyFile, link, lstat, open, realpath, statfs, unlink } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { sanitizeFilename } from "../../shared/filenames";
 export { sanitizeFilename } from "../../shared/filenames";
@@ -33,6 +34,7 @@ export async function publishFile(
   directory: string,
   title: string,
   extension: string,
+  requireAtomicLink = false,
 ): Promise<string> {
   // Even a valid media payload must not be published with an executable suffix
   // that a later explicit Open in default app action could launch as a program.
@@ -43,6 +45,7 @@ export async function publishFile(
   )
     throw new Error("unsupportedFormat");
   const basename = sanitizeFilename(title);
+  const sourceInfo = await lstat(source, { bigint: true });
   for (let count = 0; count < 10_000; count++) {
     const target = confinedPath(
       directory,
@@ -55,11 +58,27 @@ export async function publishFile(
         await link(source, target);
       } catch (error) {
         if (fileErrorCode(error) === "EEXIST") throw error;
+        if (requireAtomicLink) throw error;
         await copyFile(source, target, constants.COPYFILE_EXCL);
       }
       return target;
     } catch (error) {
-      if (fileErrorCode(error) === "EEXIST") continue;
+      if (fileErrorCode(error) === "EEXIST") {
+        // A crash can occur after the atomic link and before the SQLite path
+        // checkpoint. Reuse only the very same file, never a name/content guess.
+        const existing = await lstat(target, { bigint: true }).catch(() => undefined);
+        if (
+          requireAtomicLink &&
+          existing?.isFile() &&
+          !existing.isSymbolicLink() &&
+          sourceInfo.ino !== 0n &&
+          existing.dev === sourceInfo.dev &&
+          existing.ino === sourceInfo.ino &&
+          existing.size === sourceInfo.size
+        )
+          return target;
+        continue;
+      }
       throw new Error(fileErrorCode(error) === "ENOSPC" ? "insufficientSpace" : "fileAccessDenied");
     }
   }
@@ -72,6 +91,30 @@ export function fileErrorCode(error: unknown): string | undefined {
     typeof error.code === "string"
     ? error.code
     : undefined;
+}
+
+/** Refuse an unsupported destination before downloading a large file. */
+export async function assertAtomicPublication(directory: string): Promise<void> {
+  const source = confinedPath(directory, `.mediavault-check-${randomUUID()}.pending`);
+  const target = `${source}.link`;
+  let created = false,
+    linked = false;
+  try {
+    const file = await open(source, "wx", 0o600);
+    created = true;
+    await file.close();
+    await link(source, target);
+    linked = true;
+    const a = await lstat(source, { bigint: true }),
+      b = await lstat(target, { bigint: true });
+    if (a.ino === 0n || a.ino !== b.ino || a.dev !== b.dev)
+      throw new Error("publicationUnavailable");
+  } catch {
+    throw new Error("publicationUnavailable");
+  } finally {
+    if (linked) await unlink(target).catch(() => {});
+    if (created) await unlink(source).catch(() => {});
+  }
 }
 export async function availableBytes(directory: string): Promise<number> {
   try {

@@ -405,6 +405,7 @@
     "analyzerHint": "Cài bộ phân tích media để kiểm tra siêu dữ liệu và định dạng. Vẫn có thể phát hiện media qua mạng mà không cần bộ phân tích.",
     "refreshStatus": "Kiểm tra lại",
     "checking": "Đang kiểm tra…",
+    "invalidStartupPaths": "MediaVault không thể mở thư mục dữ liệu. Hãy dùng đường dẫn tuyệt đối nằm ngoài thư mục cài đặt ứng dụng.",
     "errors": {
       "invalidUrl": "Nhập địa chỉ trang web HTTP hoặc HTTPS hợp lệ.",
       "invalidInput": "Kiểm tra thông tin đã nhập và thử lại.",
@@ -439,7 +440,20 @@
       "driveAccountChanged": "File này thuộc tài khoản Google khác. Kết nối tài khoản đó để tiếp tục.",
       "driveAlreadyUploaded": "File này đã có bản sao được xác minh trên Drive.",
       "driveUnavailable": "Google Drive tạm thời không khả dụng. Hãy thử lại.",
-      "networkUnavailable": "Không có kết nối mạng. Hãy kiểm tra kết nối và thử lại."
+      "networkUnavailable": "Không có kết nối mạng. Hãy kiểm tra kết nối và thử lại.",
+      "startupFailed": "Không thể cập nhật khởi động cùng Windows. Hãy thử lại.",
+      "startupUnsupported": "Khởi động cùng Windows chỉ khả dụng trong bản ứng dụng Windows đã cài đặt.",
+      "productSettingsFailed": "Không thể tải hoặc lưu cài đặt chung. Hãy thử lại.",
+      "browserSessionRequired": "Đăng nhập vào trang web này trong trình duyệt MediaVault, rồi thử lại.",
+      "storageFailed": "Không thể đọc hoặc cập nhật dung lượng lưu trữ. Hãy thử lại.",
+      "databaseRecoveryFailed": "Không thể khôi phục cơ sở dữ liệu. Các file hiện có vẫn được giữ nguyên.",
+      "publicationUnavailable": "Thư mục này không hỗ trợ lưu file tải xuống có thể khôi phục an toàn. Hãy chọn thư mục trên ổ NTFS.",
+      "updateFailed": "Không thể hoàn tất cập nhật. Hãy kiểm tra kết nối và thử lại.",
+      "updateBusy": "Hãy hoàn tất các tác vụ đang chạy trước khi cập nhật hoặc khởi động lại MediaVault.",
+      "updateNotConfigured": "Bản dựng này chưa được cấu hình cập nhật ứng dụng.",
+      "updateChecksumMismatch": "Mã kiểm tra của bản cập nhật tải về không khớp. Phiên bản hiện tại vẫn được giữ nguyên.",
+      "updateUnsupported": "Môi trường này không hỗ trợ cập nhật.",
+      "diagnosticsFailed": "Không thể đọc, sao chép hoặc xuất thông tin chẩn đoán. Hãy làm mới và thử lại."
     },
     "downloadReady": "Chọn một nguồn đã phát hiện để tải xuống.",
     "librarySize": "Thư viện: {size}"
@@ -471,5 +485,182 @@
     "filename": "Tên tệp đầu ra dự kiến",
     "originalExtension": "phần mở rộng gốc",
     "filenameHint": "Tên cuối cùng có thể được điều chỉnh để loại bỏ ký tự không hợp lệ và tránh trùng tệp."
+  },
+  "product": {
+    "closeBehavior": "Khi đóng cửa sổ",
+    "close": {
+      "tray": "Thu nhỏ vào khay hệ thống",
+      "exit": "Thoát ứng dụng"
+    },
+    "appearance": "Giao diện",
+    "theme": {
+      "dark": "Tối",
+      "light": "Sáng",
+      "system": "Theo hệ thống"
+    },
+    "backgroundHint": "Tải xuống và tải lên vẫn tiếp tục khi MediaVault được thu nhỏ hoặc ẩn trong khay hệ thống.",
+    "trayUnavailable": "Khay hệ thống không khả dụng. Đóng cửa sổ sẽ thoát ứng dụng và yêu cầu xác nhận nếu còn tác vụ đang chạy.",
+    "startupUnsupported": "Khởi động cùng Windows chỉ khả dụng trong bản ứng dụng Windows đã cài đặt.",
+    "save": "Lưu cài đặt chung",
+    "saved": "Đã lưu cài đặt chung",
+    "exit": "Thoát MediaVault"
+  },
+  "onboarding": {
+    "title": "Chào mừng đến với MediaVault",
+    "hint": "Chọn một vài tùy chọn trước khi bắt đầu. Bạn có thể thay đổi sau trong Cài đặt.",
+    "progress": "Bước {step} / {total}",
+    "next": "Tiếp theo",
+    "back": "Quay lại",
+    "skip": "Bỏ qua",
+    "finish": "Hoàn tất",
+    "steps": {
+      "language": "Ngôn ngữ",
+      "folder": "Thư mục tải xuống",
+      "quality": "Chất lượng mặc định",
+      "format": "Định dạng mặc định",
+      "drive": "Google Drive",
+      "background": "Hoạt động nền"
+    },
+    "languages": {
+      "en": "English",
+      "vi": "Tiếng Việt"
+    },
+    "folderHint": "Các bản tải xuống mới sẽ được lưu vào thư mục này.",
+    "driveHint": "Kết nối Google Drive để sao lưu thư viện, hoặc bỏ qua và kết nối sau."
+  },
+  "tray": {
+    "open": "Mở MediaVault",
+    "downloads": "Tải xuống",
+    "pauseDownloads": "Tạm dừng tất cả tải xuống",
+    "resumeDownloads": "Tiếp tục tất cả tải xuống",
+    "pauseUploads": "Tạm dừng tất cả tải lên",
+    "resumeUploads": "Tiếp tục tất cả tải lên",
+    "settings": "Cài đặt",
+    "exit": "Thoát",
+    "activeTooltip": "MediaVault · {downloads} tác vụ tải xuống · {uploads} tác vụ tải lên"
+  },
+  "storage": {
+    "overview": "Dung lượng MediaVault đang sử dụng",
+    "refresh": "Làm mới dung lượng",
+    "sizes": {
+      "downloads": "Tải xuống",
+      "temp": "File tạm",
+      "thumbnails": "Ảnh thu nhỏ",
+      "database": "Cơ sở dữ liệu",
+      "logs": "Nhật ký"
+    },
+    "clean": {
+      "staleTemp": "Dọn file tạm cũ",
+      "oldLogs": "Dọn nhật ký cũ",
+      "unusedThumbnails": "Dọn ảnh thu nhỏ không còn dùng"
+    },
+    "cleaned": {
+      "staleTemp": "Đã hoàn tất dọn file tạm.",
+      "oldLogs": "Đã hoàn tất dọn nhật ký.",
+      "unusedThumbnails": "Đã hoàn tất dọn ảnh thu nhỏ."
+    },
+    "cleanupHint": "Chỉ dọn file tạm của MediaVault, nhật ký cũ và ảnh thu nhỏ không còn dùng. Video của bạn được giữ nguyên.",
+    "fingerprint": "Phát hiện file nhập trùng bằng mẫu dữ liệu",
+    "fingerprintHint": "So sánh các mẫu dữ liệu nhỏ từ file local để phát hiện file nhập trùng mà không cần đọc toàn bộ video. Tùy chọn này mặc định tắt.",
+    "fingerprintSaved": "Đã lưu cài đặt phát hiện file trùng"
+  },
+  "maintenance": {
+    "appTitle": "Cập nhật ứng dụng",
+    "currentVersion": "Phiên bản hiện tại",
+    "latestVersion": "Phiên bản mới nhất",
+    "notChecked": "Chưa kiểm tra",
+    "ytCurrent": "Phiên bản yt-dlp hiện tại",
+    "ytLatest": "Phiên bản yt-dlp mới nhất",
+    "checkYtDlp": "Kiểm tra cập nhật yt-dlp",
+    "updateYtDlp": "Cập nhật yt-dlp",
+    "ytUpdated": "Đã cập nhật yt-dlp thành công.",
+    "ytHint": "Chỉ kiểm tra cập nhật khi bạn yêu cầu. Cần hoàn tất các tác vụ phương tiện trước khi thay thế yt-dlp.",
+    "ytBusyHint": "Ở lần kiểm tra trước, yt-dlp đang được sử dụng. Kiểm tra lại để làm mới trạng thái.",
+    "updating": "Đang cập nhật…",
+    "ffmpegSource": "Nguồn bản dựng FFmpeg",
+    "checkApp": "Kiểm tra cập nhật",
+    "downloadApp": "Tải bản cập nhật",
+    "installApp": "Cài đặt cập nhật và thoát",
+    "installing": "Đang thoát để cài đặt bản cập nhật…",
+    "refresh": "Làm mới trạng thái cập nhật",
+    "appStatus": {
+      "unconfigured": "Bản dựng này chưa được cấu hình cập nhật ứng dụng.",
+      "idle": "Kiểm tra cập nhật khi bạn sẵn sàng.",
+      "checking": "Đang kiểm tra cập nhật…",
+      "current": "MediaVault đang ở phiên bản mới nhất.",
+      "available": "Có bản cập nhật mới để tải về.",
+      "downloading": "Đang tải bản cập nhật…",
+      "ready": "Bản cập nhật đã sẵn sàng. Hãy hoàn tất các tác vụ trước khi cài đặt cập nhật và thoát."
+    }
+  },
+  "diagnostics": {
+    "title": "Chẩn đoán",
+    "hint": "Thông tin ứng dụng và nhật ký đã lọc dữ liệu nhạy cảm. Bản xuất gồm phiên bản, cài đặt và nhật ký an toàn, không chứa đường dẫn file, mật khẩu, cookie hay mã truy cập tài khoản.",
+    "refresh": "Làm mới thông tin chẩn đoán",
+    "exportTitle": "Xuất thông tin chẩn đoán",
+    "exportFilter": "Thông tin chẩn đoán JSON",
+    "exported": "Đã xuất thông tin chẩn đoán.",
+    "openLogs": "Mở thư mục nhật ký",
+    "logs": "Nhật ký an toàn",
+    "component": "Thành phần",
+    "kind": "Loại mục",
+    "allComponents": "Tất cả thành phần",
+    "allKinds": "Tất cả mục",
+    "copy": "Sao chép mục đã chọn",
+    "copied": "Đã sao chép mục nhật ký.",
+    "clear": "Xóa nhật ký",
+    "cleared": "Đã xóa nhật ký.",
+    "limit": "Hiển thị tối đa {count} mục gần đây. Nhật ký chỉ chứa mã sự kiện và mã lỗi.",
+    "select": "Chọn",
+    "selectEntry": "Chọn mục nhật ký lúc {time}",
+    "time": "Thời gian",
+    "message": "Chi tiết",
+    "empty": "Không có mục nhật ký phù hợp.",
+    "working": "Đang xử lý…",
+    "yes": "Có",
+    "no": "Không",
+    "kinds": { "error": "Lỗi", "event": "Sự kiện" },
+    "session": { "persistent": "Được lưu", "temporary": "Tạm thời" },
+    "components": {
+      "download": "Tải xuống",
+      "upload": "Tải lên",
+      "drive": "Google Drive",
+      "ipc": "Kết nối ứng dụng",
+      "startup": "Khởi động",
+      "shutdown": "Thoát ứng dụng",
+      "browser": "Trình duyệt",
+      "update": "Cập nhật",
+      "diagnostics": "Chẩn đoán"
+    },
+    "events": {
+      "authAnalysisRetry": "Đã thử phân tích lại bằng phiên trình duyệt.",
+      "authDownloadUsed": "Đã dùng phiên trình duyệt để tải xuống.",
+      "cookieCleanupFailed": "Không thể dọn dữ liệu phiên trình duyệt tạm thời."
+    },
+    "fields": {
+      "appVersion": "Phiên bản MediaVault",
+      "electronVersion": "Phiên bản Electron",
+      "nodeVersion": "Phiên bản Node.js",
+      "platform": "Nền tảng",
+      "architecture": "Kiến trúc",
+      "schemaVersion": "Phiên bản lược đồ dữ liệu",
+      "databasePath": "Đường dẫn cơ sở dữ liệu",
+      "downloadFolder": "Thư mục tải xuống",
+      "driveConnected": "Đã kết nối Google Drive",
+      "browserSession": "Chế độ phiên trình duyệt",
+      "activeDownloads": "Tác vụ đang tải xuống",
+      "activeUploads": "Tác vụ đang tải lên",
+      "availableDiskSpace": "Dung lượng đĩa trống",
+      "downloadConcurrency": "Số lượt tải xuống đồng thời",
+      "uploadConcurrency": "Số lượt tải lên đồng thời"
+    }
+  },
+  "databaseRecovery": {
+    "title": "Cần khôi phục dữ liệu MediaVault",
+    "message": "MediaVault không thể mở cơ sở dữ liệu. Dữ liệu hiện có vẫn được giữ nguyên.",
+    "openFolder": "Mở thư mục dữ liệu",
+    "restore": "Khôi phục bản sao lưu mới nhất",
+    "confirmRestore": "Khôi phục bản sao lưu mới nhất? Cơ sở dữ liệu hiện tại sẽ được giữ lại trước khi khôi phục.",
+    "noBackup": "Không có bản sao lưu cơ sở dữ liệu hợp lệ."
   }
 }
