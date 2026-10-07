@@ -3,6 +3,7 @@ import type { ErrorCode, Result, ViewBounds } from "../../shared/models";
 import type { BrowserManager } from "../browser/browser-manager";
 import type { SettingsService } from "../services/settings-service";
 import type { BinaryService } from "../services/binary-service";
+import { registerLocalMediaIPC, type LocalMediaServices } from "./register-local-media-ipc";
 
 export function validBounds(value: unknown): value is ViewBounds | null {
   if (value === null) return true;
@@ -19,6 +20,7 @@ export function registerIPC(
   settings: SettingsService,
   binaries: BinaryService,
   trustedOrigin: string,
+  localMedia?: LocalMediaServices,
 ) {
   const channels: string[] = [];
   let sessionWork: Promise<unknown> = Promise.resolve();
@@ -63,10 +65,20 @@ export function registerIPC(
           "drmProtected",
           "cancelled",
           "settingsFailed",
+          "databaseFailed",
+          "downloadFailed",
+          "probeFailed",
+          "insufficientSpace",
+          "fileMissing",
+          "fileChanged",
+          "fileAccessDenied",
+          "unsupportedFormat",
         ];
+        const safeCode = allowed.includes(code as ErrorCode) ? (code as ErrorCode) : "unavailable";
+        localMedia?.logger?.error("ipc", safeCode);
         return {
           ok: false,
-          error: allowed.includes(code as ErrorCode) ? (code as ErrorCode) : "unavailable",
+          error: safeCode,
         };
       }
     });
@@ -108,5 +120,12 @@ export function registerIPC(
   handle("settings:clearCookies", () => withSession(() => browser.clearData(true)));
   handle("settings:clearData", () => withSession(() => browser.clearData(false)));
   handle("binaries:status", () => binaries.checkVersion());
-  return () => channels.forEach((channel) => ipcMain.removeHandler(channel));
+  handle("binaries:getStatus", () => binaries.getStatus());
+  const removeLocalMedia = localMedia
+    ? registerLocalMediaIPC(window, browser, localMedia, handle)
+    : () => {};
+  return () => {
+    removeLocalMedia();
+    channels.forEach((channel) => ipcMain.removeHandler(channel));
+  };
 }

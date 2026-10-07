@@ -14,8 +14,9 @@
     "electron:start": "electron .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json",
     "setup:ytdlp": "node scripts/setup-ytdlp.mjs",
+    "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
     "test:desktop": "npm run build:desktop && node scripts/smoke-electron.mjs",
-    "test:binary-setup": "node --test electron/services/setup-ytdlp.test.mjs",
+    "test:binary-setup": "node --test electron/services/setup-ytdlp.test.mjs electron/services/setup-ffmpeg.test.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -61,6 +62,7 @@
     "@tanstack/react-router": "1.170.41",
     "@tanstack/react-start": "1.168.60",
     "@tanstack/router-plugin": "1.168.42",
+    "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -88,6 +90,7 @@
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -107,6 +110,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "8.1.5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yauzl": "^3.4.0"
   }
 }

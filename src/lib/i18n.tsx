@@ -39,11 +39,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       setLangState(saved);
       document.documentElement.lang = saved;
     }
+    void window.mediaVault?.settings
+      .setLanguage(saved === "vi" ? "vi" : "en")
+      .catch(() => undefined);
   }, []);
   const setLang = useCallback((l: Lang) => {
     setLangState(l);
     localStorage.setItem("mv-lang", l);
     document.documentElement.lang = l;
+    void window.mediaVault?.settings.setLanguage(l).catch(() => undefined);
   }, []);
   const t = useCallback(
     (key: string, vars?: Record<string, string | number>) => {

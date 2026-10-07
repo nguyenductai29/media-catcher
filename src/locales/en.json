@@ -32,7 +32,10 @@
     "simulate": "Show empty state",
     "showData": "Show sample data",
     "copied": "Path copied",
-    "comingSoon": "Prototype only — not wired yet"
+    "comingSoon": "Prototype only — not wired yet",
+    "loading": "Loading…",
+    "delete": "Delete",
+    "exit": "Exit"
   },
   "status": {
     "downloading": "Downloading",
@@ -45,7 +48,10 @@
     "uploading": "Uploading",
     "uploaded": "Uploaded",
     "localOnly": "Local Only",
-    "connected": "Connected"
+    "connected": "Connected",
+    "analyzing": "Analyzing",
+    "processing": "Processing",
+    "cancelled": "Cancelled"
   },
   "browser": {
     "back": "Back",
@@ -68,7 +74,13 @@
     "related": "Related videos",
     "views": "1.2M views · 2 days ago",
     "pageDesc": "A sweeping neo-noir journey through a city that never sleeps. Directed in long takes with an original synthwave score.",
-    "tabs": { "all": "All", "video": "Video", "audio": "Audio", "hls": "HLS", "direct": "Direct" }
+    "tabs": {
+      "all": "All",
+      "video": "Video",
+      "audio": "Audio",
+      "hls": "HLS",
+      "direct": "Direct"
+    }
   },
   "downloads": {
     "title": "Downloads",
@@ -83,7 +95,10 @@
     "eta": "ETA",
     "empty": "No downloads",
     "emptyHint": "Detected media and URLs you add will appear here.",
-    "error": "Connection reset by server"
+    "error": "Connection reset by server",
+    "all": "All",
+    "speedValue": "{value}/s",
+    "exitConfirm": "Downloads are still active. Exit MediaVault?"
   },
   "library": {
     "addFile": "Add Local File",
@@ -119,7 +134,21 @@
     "sortName": "Name",
     "sortSize": "Size",
     "empty": "No library items",
-    "emptyHint": "Add a local file or folder, or finish a download to build your library."
+    "emptyHint": "Add a local file or folder, or finish a download to build your library.",
+    "deleteConfirm": "Delete this file from your computer?",
+    "unsupportedPreview": "This format cannot be previewed in MediaVault.",
+    "openExternal": "Open with default app",
+    "playerHint": "Preview the local media file.",
+    "summary": "{n} items · {size}",
+    "recursive": "Include subfolders when adding a folder",
+    "importSummary": "Added: {added} · Skipped: {skipped} · Failed: {failed}",
+    "localSource": "Local file",
+    "showDetails": "View details: {title}",
+    "sources": {
+      "all": "All",
+      "download": "Downloads",
+      "local": "Local files"
+    }
   },
   "details": {
     "title": "Media details",
@@ -156,7 +185,8 @@
     "notConnected": "Google Drive not connected",
     "notConnectedHint": "Connect your account to back up your library to the cloud.",
     "uploadingPct": "Uploading {n}%",
-    "empty": "Nothing here yet"
+    "empty": "Nothing here yet",
+    "futureHint": "Google Drive sync is planned for a future release. Your files stay in the local library."
   },
   "activity": {
     "tabs": {
@@ -164,12 +194,13 @@
       "downloads": "Downloads",
       "uploads": "Uploads",
       "errors": "Errors",
-      "browser": "Browser"
+      "browser": "Browser",
+      "library": "Library"
     },
     "today": "Today",
     "yesterday": "Yesterday",
     "empty": "No activity history",
-    "emptyHint": "Downloads, uploads and detections will be logged here.",
+    "emptyHint": "Download and library events will appear here.",
     "items": {
       "dlDone": "Movie A download completed",
       "upDone": "Movie A uploaded to Google Drive",
@@ -178,6 +209,18 @@
       "dlStart": "Started downloading Ocean Depths",
       "upStart": "Uploading Mountain Sunrise to Drive",
       "scan": "Scanned 42 network requests on vimeo.com"
+    },
+    "events": {
+      "downloadQueued": "Queued download: {title}",
+      "downloadStarted": "Started downloading: {title}",
+      "downloadPaused": "Paused download: {title}",
+      "downloadResumed": "Resumed download: {title}",
+      "downloadCancelled": "Cancelled download: {title}",
+      "downloadCompleted": "Download completed: {title}",
+      "downloadFailed": "Download failed: {title}",
+      "mediaAdded": "Added to library: {title}",
+      "mediaRemoved": "Removed from library: {title}",
+      "fileDeleted": "Deleted local file: {title}"
     }
   },
   "settings": {
@@ -212,7 +255,19 @@
     "storageManager": "Open Storage Manager",
     "language": "Language",
     "best": "Best Available",
-    "original": "Original"
+    "original": "Original",
+    "downloadSaved": "Download settings saved",
+    "saveDownloads": "Save download settings",
+    "binaries": "Media tools",
+    "binary": {
+      "ytDlp": "yt-dlp",
+      "ffmpeg": "FFmpeg",
+      "ffprobe": "ffprobe",
+      "ready": "Ready",
+      "missing": "Not installed",
+      "invalid": "Installation invalid"
+    },
+    "toolsHint": "Install the media tools to download, process and inspect files."
   },
   "about": {
     "tagline": "Your personal media vault — browse, capture, organize and sync.",
@@ -220,7 +275,7 @@
     "build": "Build",
     "license": "Personal license",
     "check": "Check for updates",
-    "credits": "Built for Windows. Engine integrations (downloader, FFmpeg, Drive) arrive in upcoming releases."
+    "credits": "Built for Windows with yt-dlp, FFmpeg and a local media library. Google Drive sync is planned for a future release."
   },
   "addUrl": {
     "title": "Add Video URL",
@@ -273,7 +328,10 @@
     "downloadLater": "Downloads arrive in a later milestone.",
     "mediaTitle": "Media {n}",
     "unknown": "Unknown",
-    "origin": { "network": "Network", "analysis": "Analyzed format" },
+    "origin": {
+      "network": "Network",
+      "analysis": "Analyzed format"
+    },
     "mediaType": {
       "video": "Video",
       "audio": "Audio",
@@ -291,7 +349,7 @@
     "noSubtitles": "None reported",
     "seconds": "{n} seconds",
     "browserHint": "Play media on the page to detect requests, or scan for available formats.",
-    "analysisHint": "Open this URL in the browser and inspect its metadata and formats. Downloads are not available yet.",
+    "analysisHint": "Open this URL in the browser and inspect its metadata and formats before downloading.",
     "save": "Save settings",
     "saving": "Saving…",
     "saved": "Browser settings saved",
@@ -311,11 +369,49 @@
       "navigationFailed": "The page could not be opened. Check the address and try again.",
       "analysisFailed": "This page could not be analyzed. Try playing the media first.",
       "analysisTimeout": "Analysis timed out. Try again or inspect the detected network media.",
-      "binaryMissing": "The media analyzer is not installed. Network detection is still available.",
-      "binaryInvalid": "The media analyzer could not be started. Check its installation.",
+      "binaryMissing": "A required media tool is not installed. Check Media tools in Settings.",
+      "binaryInvalid": "A required media tool could not be started. Check its installation.",
       "drmProtected": "This media appears to be DRM-protected and cannot be downloaded by MediaVault.",
-      "cancelled": "Analysis cancelled.",
-      "settingsFailed": "Browser settings could not be saved. Try again."
-    }
+      "cancelled": "The action was cancelled.",
+      "settingsFailed": "Settings could not be saved. Try again.",
+      "databaseFailed": "The local database could not be accessed. Try again.",
+      "downloadFailed": "The download failed. Check the source and try again.",
+      "probeFailed": "The media file could not be verified.",
+      "insufficientSpace": "There is not enough free space in the destination folder.",
+      "fileMissing": "The file could not be found. Refresh the library.",
+      "fileChanged": "The file has changed. Refresh the library before trying again.",
+      "fileAccessDenied": "MediaVault cannot access this file or folder.",
+      "unsupportedFormat": "This media format is not supported."
+    },
+    "downloadReady": "Choose a detected source to download.",
+    "librarySize": "Library: {size}"
+  },
+  "downloadDialog": {
+    "title": "Download media",
+    "hint": "Choose the quality and destination for this download.",
+    "name": "File title",
+    "destination": "Destination folder",
+    "queue": "Add to downloads",
+    "queuing": "Adding…",
+    "originalAudio": "Original audio",
+    "audioHint": "Audio uses the best available original format. The video container does not apply.",
+    "quality": {
+      "best": "Best available",
+      "selected": "Selected format",
+      "audio": "Audio only",
+      "2160": "Up to 2160p",
+      "1440": "Up to 1440p",
+      "1080": "Up to 1080p",
+      "720": "Up to 720p",
+      "480": "Up to 480p"
+    },
+    "container": {
+      "mp4": "MP4",
+      "mkv": "MKV",
+      "original": "Original"
+    },
+    "filename": "Estimated output filename",
+    "originalExtension": "original extension",
+    "filenameHint": "The final name may be adjusted for valid characters and existing files."
   }
 }

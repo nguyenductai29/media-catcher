@@ -20,12 +20,14 @@ import {
 import { cn } from "@/lib/utils";
 import { useT, type Lang } from "@/lib/i18n";
 import { Logo } from "./primitives";
+import { useDesktopDownloads, useDesktopLibrary } from "@/hooks/use-desktop-collections";
+import { formatBytes } from "@/lib/media-display";
 import { useDesktopWindow } from "@/hooks/use-desktop";
 import type { ErrorCode, Result } from "../../../shared/models";
 
 const mainNav = [
   { to: "/", key: "browser", icon: Globe },
-  { to: "/downloads", key: "downloads", icon: Download, badge: 2 },
+  { to: "/downloads", key: "downloads", icon: Download },
   { to: "/library", key: "library", icon: Library },
   { to: "/drive", key: "drive", icon: Cloud },
   { to: "/activity", key: "activity", icon: Activity },
@@ -58,7 +60,18 @@ export function LangSwitch() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const { items: jobs } = useDesktopDownloads();
+  const { items: media } = useDesktopLibrary();
+  const activeJobs = jobs.filter((job) =>
+    ["analyzing", "downloading", "processing"].includes(job.status),
+  );
+  const librarySize = formatBytes(
+    media.reduce((n, item) => n + item.fileSize, 0),
+    lang,
+    t("desktop.unknown"),
+  );
+  const totalSpeed = activeJobs.reduce((n, job) => n + (job.speed ?? 0), 0);
   const { api, state: windowState, error } = useDesktopWindow();
   const [controlError, setControlError] = useState<ErrorCode | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -105,9 +118,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         <Icon className={cn("size-[18px] shrink-0", active && "text-primary")} strokeWidth={1.75} />
         {!collapsed && <span className="truncate">{t(`nav.${item.key}`)}</span>}
-        {!collapsed && "badge" in item && (
+        {!collapsed && item.key === "downloads" && activeJobs.length > 0 && (
           <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-bold text-primary">
-            {item.badge}
+            {activeJobs.length}
           </span>
         )}
       </Link>
@@ -171,10 +184,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="mb-2 rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <HardDrive className="size-3.5" />
-                  D:\ 421 / 500 GB
-                </div>
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full w-[84%] rounded-full bg-warning" />
+                  {t("desktop.librarySize", { size: librarySize })}
                 </div>
               </div>
             )}
@@ -207,15 +217,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       <footer className="flex h-7 shrink-0 items-center gap-5 border-t border-border px-4 font-mono text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="size-1.5 rounded-full bg-primary" />
-          {t("statusbar.downloads", { n: 0 })}
+          {t("statusbar.downloads", { n: activeJobs.length })}
         </span>
         <span>
-          {t("statusbar.speed")}: <span className="text-foreground">—</span>
+          {t("statusbar.speed")}:{" "}
+          <span className="text-foreground">
+            {t("downloads.speedValue", {
+              value: formatBytes(totalSpeed, lang, t("desktop.unknown")),
+            })}
+          </span>
         </span>
-        <span>
-          {t("statusbar.storage")}: <span title={t("desktop.previewData")}>421 GB / 500 GB</span>
-        </span>
-        <span className="truncate">{t("desktop.downloadLater")}</span>
+        <span>{t("desktop.librarySize", { size: librarySize })}</span>
+
         <span className="ml-auto">{t("statusbar.version")}: v0.1.0</span>
       </footer>
     </div>

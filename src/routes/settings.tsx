@@ -11,11 +11,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Bar, PageHeader, Segmented } from "@/components/app/primitives";
+import { PageHeader, Segmented } from "@/components/app/primitives";
 import { LangSwitch } from "@/components/app/AppShell";
 import { useT } from "@/lib/i18n";
 import { useDesktopAPI } from "@/hooks/use-desktop";
-import type { BinaryStatus, BrowserSettings, ErrorCode, Result } from "../../shared/models";
+import { DownloadOptions } from "@/components/app/DownloadDialog";
+import { useDesktopAction, useDesktopLibrary } from "@/hooks/use-desktop-collections";
+import { formatBytes } from "@/lib/media-display";
+import type {
+  BinaryStatuses,
+  BrowserSettings,
+  DownloadSettings,
+  ErrorCode,
+  Result,
+} from "../../shared/models";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -62,27 +71,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function Toggle({ label, on = false }: { label: string; on?: boolean }) {
   return (
     <Row label={label}>
-      <Switch defaultChecked={on} />
+      <Switch aria-label={label} defaultChecked={on} disabled title={label} />
     </Row>
   );
 }
-function Pick({ value, options }: { value: string; options: { v: string; l: string }[] }) {
-  return (
-    <Select defaultValue={value}>
-      <SelectTrigger className="h-8 min-w-36 bg-background">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.v} value={o.v}>
-            {o.l}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 function SettingsPage() {
   const { t } = useT();
   const [del, setDel] = useState("ask");
@@ -95,96 +87,38 @@ function SettingsPage() {
             <Row label={t("settings.language")}>
               <LangSwitch />
             </Row>
-            <Toggle label={t("settings.startWin")} on />
-            <Toggle label={t("settings.tray")} on />
+            <p className="px-5 py-3 text-xs text-muted-foreground">{t("common.comingSoon")}</p>
+            <Toggle label={t("settings.startWin")} />
+            <Toggle label={t("settings.tray")} />
             <Toggle label={t("settings.background")} />
-            <Toggle label={t("settings.updates")} on />
+            <Toggle label={t("settings.updates")} />
           </Section>
-          <Section icon={Download} title={t("settings.downloads")}>
-            <div className="px-5 py-3">
-              <p className="text-sm">{t("settings.folder")}</p>
-              <div className="mt-2 flex gap-2">
-                <div className="flex h-8 flex-1 items-center rounded-md border border-input bg-background px-3 font-mono text-xs">
-                  D:\MediaVault\Downloads
-                </div>
-                <Button size="sm" variant="outline">
-                  <FolderOpen />
-                  {t("common.browse")}
-                </Button>
-              </div>
-            </div>
-            <Row label={t("settings.concurrent")}>
-              <Pick value="2" options={["1", "2", "3", "4", "6"].map((v) => ({ v, l: v }))} />
-            </Row>
-            <Row label={t("settings.quality")}>
-              <Pick
-                value="best"
-                options={[
-                  { v: "best", l: t("settings.best") },
-                  { v: "1080", l: "1080p" },
-                  { v: "720", l: "720p" },
-                ]}
-              />
-            </Row>
-            <Row label={t("settings.resolution")}>
-              <Pick
-                value="1080p"
-                options={["2160p", "1440p", "1080p", "720p", "480p"].map((v) => ({ v, l: v }))}
-              />
-            </Row>
-            <Row label={t("settings.format")}>
-              <Pick
-                value="mp4"
-                options={[
-                  { v: "mp4", l: "MP4" },
-                  { v: "mkv", l: "MKV" },
-                  { v: "orig", l: t("settings.original") },
-                ]}
-              />
-            </Row>
-            <Toggle label={t("settings.autoRetry")} on />
-          </Section>
+          <DownloadSettingsSection />
+          <BinarySettingsSection />
         </div>
         <div className="space-y-4">
           <BrowserSettingsSection />
           <Section icon={Cloud} title={t("settings.drive")}>
-            <Toggle label={t("settings.autoUpload")} on />
-            <Toggle label={t("settings.verify")} on />
+            <p className="px-5 py-3 text-xs text-muted-foreground">{t("common.comingSoon")}</p>
+            <Toggle label={t("settings.autoUpload")} />
+            <Toggle label={t("settings.verify")} />
             <Toggle label={t("settings.deleteAfter")} />
             <div className="px-5 py-3">
               <p className="mb-2 text-sm">{t("settings.deleteBehavior")}</p>
-              <Segmented
-                value={del}
-                onChange={setDel}
-                items={[
-                  { value: "never", label: t("settings.never") },
-                  { value: "ask", label: t("settings.ask") },
-                  { value: "auto", label: t("settings.auto") },
-                ]}
-              />
+              <fieldset disabled className="opacity-50">
+                <Segmented
+                  value={del}
+                  onChange={setDel}
+                  items={[
+                    { value: "never", label: t("settings.never") },
+                    { value: "ask", label: t("settings.ask") },
+                    { value: "auto", label: t("settings.auto") },
+                  ]}
+                />
+              </fieldset>
             </div>
           </Section>
-          <Section icon={Database} title={t("settings.storage")}>
-            <div className="space-y-4 px-5 py-4">
-              <div>
-                <div className="flex justify-between text-xs">
-                  <span>{t("settings.localStorage")}</span>
-                  <span className="font-mono text-muted-foreground">421 GB / 500 GB</span>
-                </div>
-                <Bar value={84} status="paused" className="mt-2" />
-              </div>
-              <div>
-                <div className="flex justify-between text-xs">
-                  <span>Google Drive</span>
-                  <span className="font-mono text-muted-foreground">812 GB / 2 TB</span>
-                </div>
-                <Bar value={40.6} className="mt-2" />
-              </div>
-              <Button size="sm" variant="outline">
-                {t("settings.storageManager")}
-              </Button>
-            </div>
-          </Section>
+          <StorageSection />
         </div>
       </div>
     </div>
@@ -195,21 +129,18 @@ function BrowserSettingsSection() {
   const { t } = useT();
   const api = useDesktopAPI();
   const [draft, setDraft] = useState<BrowserSettings | null>(null);
-  const [binary, setBinary] = useState<BinaryStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<ErrorCode | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!api) return;
     let active = true;
-    void Promise.all([api.settings.get(), api.binaries.status()])
-      .then(([settings, status]) => {
+    void api.settings
+      .get()
+      .then((settings) => {
         if (!active) return;
         if (settings.ok) setDraft(settings.value);
         else setError(settings.error);
-        if (status.ok) setBinary(status.value);
-        else setError(status.error);
       })
       .catch(() => {
         if (active) setError("unavailable");
@@ -233,20 +164,6 @@ function BrowserSettingsSection() {
       setError("unavailable");
     } finally {
       setBusy(false);
-    }
-  };
-  const refreshStatus = async () => {
-    if (!api) return;
-    setChecking(true);
-    setError(null);
-    try {
-      const result = await api.binaries.status();
-      if (result.ok) setBinary(result.value);
-      else setError(result.error);
-    } catch {
-      setError("unavailable");
-    } finally {
-      setChecking(false);
     }
   };
   return (
@@ -314,33 +231,6 @@ function BrowserSettingsSection() {
           {t("settings.clearData")}
         </Button>
       </div>
-      <div className="space-y-2 px-5 py-3">
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span>{t("desktop.analyzer")}</span>
-          <span className={binary?.available ? "text-success" : "text-muted-foreground"}>
-            {binary?.available
-              ? t("desktop.analyzerReady", { version: binary.version ?? t("desktop.unknown") })
-              : t(
-                  binary
-                    ? "desktop.analyzerMissing"
-                    : api
-                      ? "desktop.checking"
-                      : "desktop.analyzerMissing",
-                )}
-          </span>
-        </div>
-        {!binary?.available && (
-          <p className="text-xs text-muted-foreground">{t("desktop.analyzerHint")}</p>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!api || checking}
-          onClick={() => void refreshStatus()}
-        >
-          {t(checking ? "desktop.checking" : "desktop.refreshStatus")}
-        </Button>
-      </div>
       {error && (
         <p role="alert" className="px-5 py-3 text-xs text-destructive">
           {t(`desktop.errors.${error}`)}
@@ -351,6 +241,222 @@ function BrowserSettingsSection() {
           {t(notice)}
         </p>
       )}
+    </Section>
+  );
+}
+
+function DownloadSettingsSection() {
+  const { t } = useT();
+  const api = useDesktopAPI();
+  const action = useDesktopAction();
+  const [draft, setDraft] = useState<DownloadSettings | null>(null);
+  const [error, setError] = useState<ErrorCode | null>(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (!api) return;
+    let active = true;
+    void api.settings
+      .getDownloads()
+      .then((result) => {
+        if (!active) return;
+        if (result.ok) setDraft(result.value);
+        else setError(result.error);
+      })
+      .catch(() => {
+        if (active) setError("unavailable");
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
+  const change = (patch: Partial<DownloadSettings>) => {
+    setSaved(false);
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+  };
+  const choose = async () => {
+    if (!api) return;
+    const result = await action.run(() => api.downloads.chooseDirectory());
+    if (result?.ok && result.value) change({ directory: result.value });
+  };
+  const save = async () => {
+    if (!api || !draft) return;
+    setSaved(false);
+    const result = await action.run(() => api.settings.updateDownloads(draft));
+    if (result?.ok) {
+      setDraft(result.value);
+      setSaved(true);
+      setError(null);
+    }
+  };
+  return (
+    <Section icon={Download} title={t("settings.downloads")}>
+      {!api && (
+        <p className="px-5 py-3 text-xs text-muted-foreground">{t("desktop.launchTitle")}</p>
+      )}
+      <div className="px-5 py-3">
+        <p className="text-sm">{t("settings.folder")}</p>
+        <div className="mt-2 flex items-center gap-2">
+          <p className="min-w-0 flex-1 break-all rounded-md border border-input bg-background p-2 font-mono text-xs">
+            {draft?.directory || t(api ? "common.loading" : "desktop.unknown")}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!draft || action.busy}
+            onClick={() => void choose()}
+          >
+            <FolderOpen />
+            {t("common.browse")}
+          </Button>
+        </div>
+      </div>
+      <Row label={t("settings.concurrent")}>
+        <Select
+          value={String(draft?.concurrency ?? 1)}
+          onValueChange={(value) => change({ concurrency: Number(value) })}
+          disabled={!draft || action.busy}
+        >
+          <SelectTrigger
+            aria-label={t("settings.concurrent")}
+            className="h-8 min-w-36 bg-background"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <SelectItem key={value} value={String(value)}>
+                {value}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Row>
+      <div className="space-y-3 px-5 py-3">
+        <DownloadOptions
+          quality={draft?.quality ?? "best"}
+          container={draft?.container ?? "mp4"}
+          selected
+          disabled={!draft || action.busy}
+          onQuality={(quality) => change({ quality })}
+          onContainer={(container) => change({ container })}
+        />
+      </div>
+      <Row label={t("settings.autoRetry")}>
+        <Switch
+          aria-label={t("settings.autoRetry")}
+          checked={draft?.autoRetry ?? false}
+          disabled={!draft || action.busy}
+          onCheckedChange={(autoRetry) => change({ autoRetry })}
+        />
+      </Row>
+      <div className="space-y-2 px-5 py-3">
+        <Button size="sm" disabled={!draft || action.busy} onClick={() => void save()}>
+          {t(action.busy ? "desktop.saving" : "settings.saveDownloads")}
+        </Button>
+        {(action.error || error) && (
+          <p role="alert" className="text-xs text-destructive">
+            {t(`desktop.errors.${action.error ?? error}`)}
+          </p>
+        )}
+        {saved && (
+          <p role="status" className="text-xs text-success">
+            {t("settings.downloadSaved")}
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+function BinarySettingsSection() {
+  const { t } = useT();
+  const api = useDesktopAPI();
+  const [status, setStatus] = useState<BinaryStatuses | null>(null);
+  const [error, setError] = useState<ErrorCode | null>(null);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => {
+    if (!api) return;
+    let active = true;
+    setChecking(true);
+    void api.binaries
+      .getStatus()
+      .then((result) => {
+        if (!active) return;
+        if (result.ok) setStatus(result.value);
+        else setError(result.error);
+      })
+      .catch(() => {
+        if (active) setError("unavailable");
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
+  const refresh = async () => {
+    if (!api) return;
+    setChecking(true);
+    setError(null);
+    try {
+      const result = await api.binaries.getStatus();
+      if (result.ok) setStatus(result.value);
+      else setError(result.error);
+    } catch {
+      setError("unavailable");
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <Section icon={Settings2} title={t("settings.binaries")}>
+      {(["ytDlp", "ffmpeg", "ffprobe"] as const).map((key) => (
+        <Row key={key} label={t(`settings.binary.${key}`)}>
+          <span
+            className={`text-xs ${status?.[key].state === "ready" ? "text-success" : "text-muted-foreground"}`}
+          >
+            {status
+              ? t(`settings.binary.${status[key].state}`)
+              : t(api ? "desktop.checking" : "desktop.analyzerMissing")}
+            {status?.[key].version && ` · ${status[key].version}`}
+          </span>
+        </Row>
+      ))}
+      <div className="space-y-3 px-5 py-3">
+        <p className="text-xs text-muted-foreground">{t("settings.toolsHint")}</p>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!api || checking}
+          onClick={() => void refresh()}
+        >
+          {t(checking ? "desktop.checking" : "desktop.refreshStatus")}
+        </Button>
+        {error && (
+          <p role="alert" className="text-xs text-destructive">
+            {t(`desktop.errors.${error}`)}
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+function StorageSection() {
+  const { t, lang } = useT();
+  const { items } = useDesktopLibrary();
+  return (
+    <Section icon={Database} title={t("settings.storage")}>
+      <div className="px-5 py-4">
+        <p className="text-xs text-muted-foreground">
+          {t("desktop.librarySize", {
+            size: formatBytes(
+              items.reduce((n, item) => n + item.fileSize, 0),
+              lang,
+              t("desktop.unknown"),
+            ),
+          })}
+        </p>
+      </div>
     </Section>
   );
 }

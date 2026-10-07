@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { DownloadDialog } from "@/components/app/DownloadDialog";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -47,6 +48,7 @@ function BrowserPage() {
   const [url, setUrl] = useState("");
   const [tab, setTab] = useState<Tab>("all");
   const [showPanel, setShowPanel] = useState(true);
+  const [downloadMedia, setDownloadMedia] = useState<DetectedMedia | null>(null);
   const [actionError, setActionError] = useState<ErrorCode | null>(null);
   const latestAction = useRef(0);
   useEffect(() => {
@@ -226,7 +228,13 @@ function BrowserPage() {
               {filtered.length ? (
                 <div className="space-y-2.5">
                   {filtered.map((media, index) => (
-                    <MediaCard key={media.id} media={media} index={index + 1} />
+                    <MediaCard
+                      key={media.id}
+                      media={media}
+                      index={index + 1}
+                      onDownload={() => setDownloadMedia(media)}
+                      disabled={!api || !!state.analysis?.drmProtected}
+                    />
                   ))}
                 </div>
               ) : (
@@ -240,11 +248,12 @@ function BrowserPage() {
               )}
             </div>
             <div className="border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
-              {t("desktop.downloadLater")}
+              {t("desktop.downloadReady")}
             </div>
           </aside>
         )}
       </div>
+      <DownloadDialog media={downloadMedia} onClose={() => setDownloadMedia(null)} />
     </div>
   );
 }
@@ -285,7 +294,17 @@ function AnalysisSummary({ analysis }: { analysis: PageAnalysis }) {
   );
 }
 
-function MediaCard({ media, index }: { media: DetectedMedia; index: number }) {
+function MediaCard({
+  media,
+  index,
+  onDownload,
+  disabled,
+}: {
+  media: DetectedMedia;
+  index: number;
+  onDownload: () => void;
+  disabled: boolean;
+}) {
   const { t, lang } = useT();
   const Icon = media.type === "audio" ? AudioLines : Film;
   const host = (() => {
@@ -359,13 +378,7 @@ function MediaCard({ media, index }: { media: DetectedMedia; index: number }) {
             <Volume2 className="size-3.5 text-muted-foreground" aria-label={t("browser.audio")} />
           )}
         </div>
-        <Button
-          size="sm"
-          variant="subtle"
-          className="h-7"
-          disabled
-          title={t("desktop.downloadLater")}
-        >
+        <Button size="sm" variant="subtle" className="h-7" disabled={disabled} onClick={onDownload}>
           <Download />
           {t("common.download")}
         </Button>

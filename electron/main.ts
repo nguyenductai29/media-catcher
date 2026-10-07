@@ -1,11 +1,24 @@
-import { app, BrowserWindow, Menu, net, protocol, session } from "electron";
-import { isAbsolute, join, relative, resolve, extname } from "node:path";
-import { pathToFileURL } from "node:url";
+import { app, BrowserWindow, dialog, Menu, net, protocol, session } from "electron";
+import { isAbsolute, join, resolve } from "node:path";
 import { BrowserManager } from "./browser/browser-manager";
 import { YtDlpService } from "./downloads/ytdlp-service";
 import { BinaryService } from "./services/binary-service";
 import { SettingsService } from "./services/settings-service";
 import { registerIPC } from "./ipc/register-ipc";
+import { SqliteDatabase } from "./database/database";
+import { DownloadRepository } from "./repositories/download-repository";
+import { MediaRepository } from "./repositories/media-repository";
+import { ActivityRepository } from "./repositories/activity-repository";
+import { SettingsRepository } from "./repositories/settings-repository";
+import { DownloadSettingsService } from "./services/download-settings-service";
+import { ActivityService } from "./services/activity-service";
+import { FFmpegService } from "./services/ffmpeg-service";
+import { LibraryService } from "./library/library-service";
+import { DownloadManager } from "./downloads/download-manager";
+import { DownloadWorker } from "./downloads/download-worker";
+import { nativeText } from "./services/native-i18n";
+import { createAppProtocol } from "./services/app-protocol";
+import { LocalLogger } from "./services/local-logger";
 
 app.setName("MediaVault");
 if (
@@ -16,7 +29,10 @@ if (
   app.setPath("userData", process.env["MEDIAVAULT_USER_DATA"]);
 else app.setPath("userData", join(app.getPath("appData"), "MediaVault"));
 protocol.registerSchemesAsPrivileged([
-  { scheme: "mediavault", privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  {
+    scheme: "mediavault",
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
 ]);
 let mainWindow: BrowserWindow | null = null;
 const lock = app.requestSingleInstanceLock();
@@ -31,24 +47,6 @@ else {
     .then(async () => {
       Menu.setApplicationMenu(null);
       const rendererRoot = resolve(app.getAppPath(), "dist-desktop");
-      protocol.handle("mediavault", (request) => {
-        const url = new URL(request.url);
-        if (url.host !== "app" || request.method !== "GET")
-          return new Response(null, { status: 403 });
-        let file: string;
-        try {
-          file = resolve(
-            rendererRoot,
-            `.${decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname)}`,
-          );
-        } catch {
-          return new Response(null, { status: 400 });
-        }
-        const rel = relative(rendererRoot, file);
-        if (isAbsolute(rel) || rel.startsWith("..") || !extname(file))
-          return new Response(null, { status: 403 });
-        return net.fetch(pathToFileURL(file).href);
-      });
       const settings = new SettingsService(app.getPath("userData"));
       await settings.load();
       const binaries = new BinaryService({
@@ -57,6 +55,37 @@ else {
         appPath: app.getAppPath(),
       });
       const analyzer = new YtDlpService(binaries);
+      const logger = new LocalLogger(app.getPath("userData"));
+      const database = new SqliteDatabase(app.getPath("userData"));
+      const media = new MediaRepository(database);
+      const videosOverride = !app.isPackaged ? process.env["MEDIAVAULT_VIDEOS_DIR"] : undefined;
+      const videosDirectory =
+        videosOverride && isAbsolute(videosOverride) ? videosOverride : app.getPath("videos");
+      const downloadSettings = new DownloadSettingsService(
+        new SettingsRepository(database),
+        videosDirectory,
+        [app.getAppPath(), process.resourcesPath],
+      );
+      const activity = new ActivityService(new ActivityRepository(database));
+      const ffmpeg = new FFmpegService(binaries);
+      const library = new LibraryService({
+        database,
+        media,
+        ffmpeg,
+        settings: downloadSettings,
+        activity,
+      });
+      const downloads = new DownloadManager({
+        database,
+        downloads: new DownloadRepository(database),
+        media,
+        settings: downloadSettings,
+        activity,
+        executor: new DownloadWorker(analyzer, ffmpeg, downloadSettings),
+        prepareMedia: (job, file, signal) => library.prepareDownloadedMedia(job, file, signal),
+        onLibraryChanged: () => library.events.notify(),
+        logError: (jobId, code) => logger.error("download", code, jobId),
+      });
       let devURL: string | undefined;
       if (!app.isPackaged && process.env["MEDIAVAULT_DEV_URL"]) {
         const url = new URL(process.env["MEDIAVAULT_DEV_URL"]);
@@ -64,6 +93,16 @@ else {
           throw new Error("Invalid desktop development origin");
         devURL = url.origin;
       }
+      protocol.handle(
+        "mediavault",
+        createAppProtocol({
+          rendererRoot,
+          thumbnailDirectory: downloadSettings.thumbnailDirectory,
+          trustedOrigin: devURL ?? "mediavault://app",
+          library,
+          fetchFile: (url, options) => net.fetch(url, options),
+        }),
+      );
       session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) =>
         callback(false),
       );
@@ -95,6 +134,7 @@ else {
         settings,
         binaries,
         devURL ?? "mediavault://app",
+        { downloads, library, downloadSettings, activity, logger },
       );
       window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -114,9 +154,43 @@ else {
       window.on("maximize", emitWindow);
       window.on("unmaximize", emitWindow);
       window.once("ready-to-show", () => window.show());
-      window.on("close", () => {
-        browser.dispose();
-        removeIPC();
+      let closing = false;
+      let canClose = false;
+      window.on("close", (event) => {
+        if (canClose) return;
+        event.preventDefault();
+        if (closing) return;
+        closing = true;
+        void (async () => {
+          if (downloads.hasActiveWork()) {
+            const t = (key: string) => nativeText(downloadSettings.getLanguage(), key);
+            const answer = await dialog.showMessageBox(window, {
+              type: "question",
+              title: "MediaVault",
+              message: t("downloads.exitConfirm"),
+              buttons: [t("common.cancel"), t("common.exit")],
+              defaultId: 0,
+              cancelId: 0,
+              noLink: true,
+            });
+            if (answer.response !== 1) {
+              closing = false;
+              return;
+            }
+          }
+          await downloads.shutdown();
+          await library.shutdown();
+          activity.dispose();
+          browser.dispose();
+          removeIPC();
+          database.close();
+          await logger.flush();
+          canClose = true;
+          window.close();
+        })().catch(() => {
+          logger.error("shutdown", "unavailable");
+          closing = false;
+        });
       });
       window.on("closed", () => {
         mainWindow = null;

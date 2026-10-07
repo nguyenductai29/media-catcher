@@ -32,7 +32,10 @@
     "simulate": "Xem trạng thái trống",
     "showData": "Xem dữ liệu mẫu",
     "copied": "Đã sao chép đường dẫn",
-    "comingSoon": "Bản mẫu — chưa kết nối"
+    "comingSoon": "Bản mẫu — chưa kết nối",
+    "loading": "Đang tải…",
+    "delete": "Xóa",
+    "exit": "Thoát"
   },
   "status": {
     "downloading": "Đang tải",
@@ -45,7 +48,10 @@
     "uploading": "Đang tải lên",
     "uploaded": "Đã tải lên",
     "localOnly": "Chỉ local",
-    "connected": "Đã kết nối"
+    "connected": "Đã kết nối",
+    "analyzing": "Đang phân tích",
+    "processing": "Đang xử lý",
+    "cancelled": "Đã hủy"
   },
   "browser": {
     "back": "Quay lại",
@@ -89,7 +95,10 @@
     "eta": "Còn lại",
     "empty": "Chưa có lượt tải",
     "emptyHint": "Media phát hiện được và URL bạn thêm sẽ hiển thị ở đây.",
-    "error": "Máy chủ đã ngắt kết nối"
+    "error": "Máy chủ đã ngắt kết nối",
+    "all": "Tất cả",
+    "speedValue": "{value}/giây",
+    "exitConfirm": "Vẫn còn tác vụ tải xuống đang hoạt động. Bạn có muốn thoát MediaVault không?"
   },
   "library": {
     "addFile": "Thêm file local",
@@ -125,7 +134,21 @@
     "sortName": "Tên",
     "sortSize": "Dung lượng",
     "empty": "Thư viện chưa có dữ liệu",
-    "emptyHint": "Thêm file hoặc thư mục local, hoặc hoàn tất một lượt tải để xây dựng thư viện."
+    "emptyHint": "Thêm file hoặc thư mục local, hoặc hoàn tất một lượt tải để xây dựng thư viện.",
+    "deleteConfirm": "Xóa file này khỏi máy tính?",
+    "unsupportedPreview": "Định dạng này không thể xem trước trong MediaVault.",
+    "openExternal": "Mở bằng ứng dụng mặc định",
+    "playerHint": "Xem trước tệp phương tiện cục bộ.",
+    "summary": "{n} mục · {size}",
+    "recursive": "Bao gồm thư mục con khi thêm thư mục",
+    "importSummary": "Đã thêm: {added} · Bỏ qua: {skipped} · Lỗi: {failed}",
+    "localSource": "Tệp cục bộ",
+    "showDetails": "Xem chi tiết: {title}",
+    "sources": {
+      "all": "Tất cả",
+      "download": "Tải xuống",
+      "local": "Tệp cục bộ"
+    }
   },
   "details": {
     "title": "Chi tiết media",
@@ -162,7 +185,8 @@
     "notConnected": "Google Drive chưa kết nối",
     "notConnectedHint": "Kết nối tài khoản để sao lưu thư viện lên đám mây.",
     "uploadingPct": "Đang tải lên {n}%",
-    "empty": "Chưa có mục nào"
+    "empty": "Chưa có mục nào",
+    "futureHint": "Đồng bộ Google Drive được dự kiến cho phiên bản sau. Các tệp của bạn được lưu trong thư viện cục bộ."
   },
   "activity": {
     "tabs": {
@@ -170,12 +194,13 @@
       "downloads": "Tải xuống",
       "uploads": "Tải lên",
       "errors": "Lỗi",
-      "browser": "Trình duyệt"
+      "browser": "Trình duyệt",
+      "library": "Thư viện"
     },
     "today": "Hôm nay",
     "yesterday": "Hôm qua",
     "empty": "Chưa có lịch sử hoạt động",
-    "emptyHint": "Các lượt tải, tải lên và phát hiện media sẽ được ghi lại ở đây.",
+    "emptyHint": "Các sự kiện tải xuống và thư viện sẽ hiển thị tại đây.",
     "items": {
       "dlDone": "Tải Movie A hoàn tất",
       "upDone": "Movie A đã được tải lên Google Drive",
@@ -184,6 +209,18 @@
       "dlStart": "Bắt đầu tải Ocean Depths",
       "upStart": "Đang tải Mountain Sunrise lên Drive",
       "scan": "Đã quét 42 yêu cầu mạng trên vimeo.com"
+    },
+    "events": {
+      "downloadQueued": "Đã xếp hàng tải: {title}",
+      "downloadStarted": "Bắt đầu tải: {title}",
+      "downloadPaused": "Đã tạm dừng tải: {title}",
+      "downloadResumed": "Đã tiếp tục tải: {title}",
+      "downloadCancelled": "Đã hủy tải: {title}",
+      "downloadCompleted": "Đã tải xong: {title}",
+      "downloadFailed": "Tải xuống thất bại: {title}",
+      "mediaAdded": "Đã thêm vào thư viện: {title}",
+      "mediaRemoved": "Đã xóa khỏi thư viện: {title}",
+      "fileDeleted": "Đã xóa tệp cục bộ: {title}"
     }
   },
   "settings": {
@@ -218,7 +255,19 @@
     "storageManager": "Mở quản lý dung lượng",
     "language": "Ngôn ngữ",
     "best": "Tốt nhất có thể",
-    "original": "Gốc"
+    "original": "Gốc",
+    "downloadSaved": "Đã lưu cài đặt tải xuống",
+    "saveDownloads": "Lưu cài đặt tải xuống",
+    "binaries": "Công cụ phương tiện",
+    "binary": {
+      "ytDlp": "yt-dlp",
+      "ffmpeg": "FFmpeg",
+      "ffprobe": "ffprobe",
+      "ready": "Sẵn sàng",
+      "missing": "Chưa cài đặt",
+      "invalid": "Bản cài đặt không hợp lệ"
+    },
+    "toolsHint": "Cài đặt công cụ phương tiện để tải xuống, xử lý và kiểm tra tệp."
   },
   "about": {
     "tagline": "Kho media cá nhân — duyệt, thu thập, sắp xếp và đồng bộ.",
@@ -226,7 +275,7 @@
     "build": "Bản dựng",
     "license": "Giấy phép cá nhân",
     "check": "Kiểm tra cập nhật",
-    "credits": "Dành cho Windows. Các tích hợp (trình tải, FFmpeg, Drive) sẽ có trong các bản phát hành tới."
+    "credits": "Được xây dựng cho Windows với yt-dlp, FFmpeg và thư viện phương tiện cục bộ. Đồng bộ Google Drive được dự kiến cho phiên bản sau."
   },
   "addUrl": {
     "title": "Thêm URL video",
@@ -279,7 +328,10 @@
     "downloadLater": "Chức năng tải xuống sẽ có ở giai đoạn sau.",
     "mediaTitle": "Media {n}",
     "unknown": "Chưa rõ",
-    "origin": { "network": "Mạng", "analysis": "Định dạng đã phân tích" },
+    "origin": {
+      "network": "Mạng",
+      "analysis": "Định dạng đã phân tích"
+    },
     "mediaType": {
       "video": "Video",
       "audio": "Âm thanh",
@@ -297,7 +349,7 @@
     "noSubtitles": "Không có thông tin",
     "seconds": "{n} giây",
     "browserHint": "Phát media trên trang để phát hiện yêu cầu mạng, hoặc quét các định dạng có sẵn.",
-    "analysisHint": "Mở URL này trong trình duyệt để kiểm tra siêu dữ liệu và định dạng. Chưa hỗ trợ tải xuống.",
+    "analysisHint": "Mở URL này trong trình duyệt và kiểm tra thông tin, định dạng trước khi tải xuống.",
     "save": "Lưu cài đặt",
     "saving": "Đang lưu…",
     "saved": "Đã lưu cài đặt trình duyệt",
@@ -317,11 +369,49 @@
       "navigationFailed": "Không thể mở trang. Kiểm tra địa chỉ và thử lại.",
       "analysisFailed": "Không thể phân tích trang này. Hãy thử phát media trước.",
       "analysisTimeout": "Phân tích quá thời gian. Thử lại hoặc kiểm tra media đã phát hiện qua mạng.",
-      "binaryMissing": "Chưa cài bộ phân tích media. Vẫn có thể phát hiện media qua mạng.",
-      "binaryInvalid": "Không thể khởi động bộ phân tích media. Kiểm tra bản cài đặt.",
+      "binaryMissing": "Chưa cài đặt công cụ phương tiện cần thiết. Kiểm tra Công cụ phương tiện trong Cài đặt.",
+      "binaryInvalid": "Không thể khởi động công cụ phương tiện cần thiết. Hãy kiểm tra bản cài đặt.",
       "drmProtected": "Nội dung này có vẻ được bảo vệ bằng DRM và MediaVault không thể tải xuống.",
-      "cancelled": "Đã hủy phân tích.",
-      "settingsFailed": "Không thể lưu cài đặt trình duyệt. Hãy thử lại."
-    }
+      "cancelled": "Đã hủy thao tác.",
+      "settingsFailed": "Không thể lưu cài đặt. Hãy thử lại.",
+      "databaseFailed": "Không thể truy cập cơ sở dữ liệu cục bộ. Hãy thử lại.",
+      "downloadFailed": "Tải xuống thất bại. Hãy kiểm tra nguồn và thử lại.",
+      "probeFailed": "Không thể xác minh tệp phương tiện.",
+      "insufficientSpace": "Thư mục lưu không còn đủ dung lượng trống.",
+      "fileMissing": "Không tìm thấy tệp. Hãy làm mới thư viện.",
+      "fileChanged": "Tệp đã thay đổi. Hãy làm mới thư viện trước khi thử lại.",
+      "fileAccessDenied": "MediaVault không thể truy cập tệp hoặc thư mục này.",
+      "unsupportedFormat": "Định dạng phương tiện này không được hỗ trợ."
+    },
+    "downloadReady": "Chọn một nguồn đã phát hiện để tải xuống.",
+    "librarySize": "Thư viện: {size}"
+  },
+  "downloadDialog": {
+    "title": "Tải nội dung",
+    "hint": "Chọn chất lượng và thư mục lưu cho lượt tải này.",
+    "name": "Tên tệp",
+    "destination": "Thư mục lưu",
+    "queue": "Thêm vào tải xuống",
+    "queuing": "Đang thêm…",
+    "originalAudio": "Âm thanh gốc",
+    "audioHint": "Âm thanh dùng định dạng gốc tốt nhất hiện có. Không áp dụng định dạng video.",
+    "quality": {
+      "best": "Tốt nhất hiện có",
+      "selected": "Định dạng đã chọn",
+      "audio": "Chỉ âm thanh",
+      "2160": "Tối đa 2160p",
+      "1440": "Tối đa 1440p",
+      "1080": "Tối đa 1080p",
+      "720": "Tối đa 720p",
+      "480": "Tối đa 480p"
+    },
+    "container": {
+      "mp4": "MP4",
+      "mkv": "MKV",
+      "original": "Gốc"
+    },
+    "filename": "Tên tệp đầu ra dự kiến",
+    "originalExtension": "phần mở rộng gốc",
+    "filenameHint": "Tên cuối cùng có thể được điều chỉnh để loại bỏ ký tự không hợp lệ và tránh trùng tệp."
   }
 }

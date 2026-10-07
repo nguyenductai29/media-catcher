@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import type { ComponentType } from "react";
-import type { BrowserSettings } from "../../shared/models";
+import type { BrowserSettings, DownloadSettings } from "../../shared/models";
 import { Route } from "@/routes/settings";
 import { I18nProvider } from "@/lib/i18n";
 import { desktopFixture } from "./desktop-fixture";
@@ -48,6 +48,40 @@ it("reports settings failures without claiming successful persistence", async ()
   const save = screen.getByRole("button", { name: "Save settings" });
   await waitFor(() => expect(save).toBeEnabled());
   fireEvent.click(save);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Browser settings could not be saved");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Settings could not be saved");
   expect(screen.queryByText("Browser settings saved")).not.toBeInTheDocument();
+});
+
+it("saves download preferences with an approved native directory and shows all media tools", async () => {
+  const fixture = desktopFixture();
+  let saved: DownloadSettings | undefined;
+  fixture.api.downloads.chooseDirectory = async () => ({ ok: true, value: "D:\\Media" });
+  fixture.api.settings.updateDownloads = async (settings) => {
+    saved = settings;
+    return { ok: true, value: settings };
+  };
+  window.mediaVault = fixture.api;
+  const SettingsPage = Route.options.component as ComponentType;
+  render(
+    <I18nProvider>
+      <SettingsPage />
+    </I18nProvider>,
+  );
+  const save = await screen.findByRole("button", { name: "Save download settings" });
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Browse" }));
+  await screen.findByText("D:\\Media");
+  fireEvent.click(screen.getByRole("switch", { name: "Automatically retry failed downloads" }));
+  fireEvent.click(save);
+  await screen.findByText("Download settings saved");
+  expect(saved).toEqual({
+    directory: "D:\\Media",
+    concurrency: 2,
+    quality: "best",
+    container: "mp4",
+    autoRetry: true,
+  });
+  expect(screen.getByText("yt-dlp")).toBeInTheDocument();
+  expect(screen.getByText("FFmpeg")).toBeInTheDocument();
+  expect(screen.getByText("ffprobe")).toBeInTheDocument();
 });

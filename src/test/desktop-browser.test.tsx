@@ -66,8 +66,9 @@ describe("desktop browser state", () => {
     expect(screen.queryByRole("button", { name: "Download" })).not.toBeInTheDocument();
   });
 
-  it("opens the entered URL and displays live detected formats with downloads disabled", async () => {
+  it("opens the entered URL and submits a detected candidate without exposing its signed URL", async () => {
     const fixture = desktopFixture();
+    const add = vi.spyOn(fixture.api.downloads, "add");
     const opened: string[] = [];
     fixture.api.browser.open = async (url) => {
       opened.push(url);
@@ -108,7 +109,21 @@ describe("desktop browser state", () => {
     expect(screen.getByText("Example video")).toBeInTheDocument();
     expect(screen.getByText("1920×1080")).toBeInTheDocument();
     expect(screen.getByText("4,200 kbps")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Download" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add to downloads" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add to downloads" }));
+    await waitFor(() =>
+      expect(add).toHaveBeenCalledWith({
+        mediaId: "format-1",
+        title: "Example video",
+        quality: "best",
+        container: "mp4",
+        destinationDirectory: "C:\\Videos\\MediaVault\\Downloads",
+      }),
+    );
     expect(document.body.textContent).not.toContain("secret=hidden");
   });
 

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   Download,
+  Film,
   FolderOpen,
   Pause,
   Play,
@@ -16,17 +17,20 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddUrlDialog } from "@/components/app/AddUrlDialog";
+import { MediaPlayerDialog, type Playback } from "@/components/app/MediaPlayerDialog";
 import {
   Bar,
   EmptyState,
   IconBtn,
   PageHeader,
+  Segmented,
   StatusBadge,
-  Thumb,
 } from "@/components/app/primitives";
+import { useDesktopDownloads, useDesktopAction } from "@/hooks/use-desktop-collections";
 import { useT } from "@/lib/i18n";
-import { downloads as seed, type DownloadItem, type StatusKey } from "@/lib/mock";
+import { formatBytes, formatDuration, mediaHost } from "@/lib/media-display";
 import { cn } from "@/lib/utils";
+import type { DownloadJob, DownloadStatus } from "../../shared/models";
 
 export const Route = createFileRoute("/downloads")({
   head: () => ({
@@ -43,36 +47,38 @@ export const Route = createFileRoute("/downloads")({
   component: DownloadsPage,
 });
 
+const activeStatuses: DownloadStatus[] = ["analyzing", "downloading", "processing"];
+type Filter = "all" | "active" | "waiting" | "completed" | "failed";
+const matches = (job: DownloadJob, filter: Filter) =>
+  filter === "all" ||
+  (filter === "active"
+    ? activeStatuses.includes(job.status)
+    : filter === "waiting"
+      ? ["queued", "paused"].includes(job.status)
+      : job.status === filter);
+
 function DownloadsPage() {
-  const { t } = useT();
-  const [items, setItems] = useState<DownloadItem[]>(seed);
+  const { t, lang } = useT();
+  const { api, items, loading, error } = useDesktopDownloads();
+  const action = useDesktopAction();
   const [open, setOpen] = useState(false);
-  const set = (id: string, status: StatusKey) =>
-    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, status } : x)));
-  const count = (s: StatusKey[]) => items.filter((i) => s.includes(i.status)).length;
-
+  const [filter, setFilter] = useState<Filter>("all");
+  const [playback, setPlayback] = useState<Playback | null>(null);
   const stats = [
-    { label: t("downloads.active"), n: count(["downloading"]), icon: Zap, cls: "text-primary" },
-    {
-      label: t("downloads.waiting"),
-      n: count(["queued", "paused"]),
-      icon: Clock,
-      cls: "text-warning",
-    },
-    {
-      label: t("downloads.completed"),
-      n: count(["completed"]),
-      icon: CheckCircle2,
-      cls: "text-success",
-    },
-    {
-      label: t("downloads.failed"),
-      n: count(["failed"]),
-      icon: AlertTriangle,
-      cls: "text-destructive",
-    },
+    { key: "active" as const, icon: Zap, cls: "text-primary" },
+    { key: "waiting" as const, icon: Clock, cls: "text-warning" },
+    { key: "completed" as const, icon: CheckCircle2, cls: "text-success" },
+    { key: "failed" as const, icon: AlertTriangle, cls: "text-destructive" },
   ];
-
+  const perform = (id: string, command: "pause" | "resume" | "cancel" | "retry" | "openFolder") => {
+    if (api) void action.run(() => api.downloads[command](id));
+  };
+  const play = async (job: DownloadJob) => {
+    if (!api) return;
+    const result = await action.run(() => api.downloads.play(job.id));
+    if (result?.ok) setPlayback({ url: result.value, title: job.title, mediaId: job.mediaId });
+  };
+  const visible = items.filter((item) => matches(item, filter));
   return (
     <div className="h-full overflow-y-auto p-6">
       <PageHeader
@@ -82,11 +88,14 @@ function DownloadsPage() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() =>
-                setItems((xs) =>
-                  xs.map((x) => (x.status === "downloading" ? { ...x, status: "paused" } : x)),
-                )
+              disabled={
+                !api ||
+                action.busy ||
+                !items.some((i) => activeStatuses.includes(i.status) || i.status === "queued")
               }
+              onClick={() => {
+                if (api) void action.run(() => api.downloads.pauseAll());
+              }}
             >
               <Pause />
               {t("downloads.pauseAll")}
@@ -94,20 +103,10 @@ function DownloadsPage() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() =>
-                setItems((xs) =>
-                  xs.map((x) =>
-                    x.status === "paused"
-                      ? {
-                          ...x,
-                          status: "downloading",
-                          speed: x.speed ?? "9.1 MB/s",
-                          eta: x.eta ?? "4m 02s",
-                        }
-                      : x,
-                  ),
-                )
-              }
+              disabled={!api || action.busy || !items.some((i) => i.status === "paused")}
+              onClick={() => {
+                if (api) void action.run(() => api.downloads.resumeAll());
+              }}
             >
               <Play />
               {t("downloads.resumeAll")}
@@ -115,7 +114,10 @@ function DownloadsPage() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setItems((xs) => xs.filter((x) => x.status !== "completed"))}
+              disabled={!api || action.busy || !items.some((i) => i.status === "completed")}
+              onClick={() => {
+                if (api) void action.run(() => api.downloads.clearCompleted());
+              }}
             >
               <Trash2 />
               {t("downloads.clearCompleted")}
@@ -129,17 +131,46 @@ function DownloadsPage() {
       />
       <div className="mt-5 grid grid-cols-4 gap-3">
         {stats.map((s) => (
-          <div key={s.label} className="panel flex items-center gap-3 p-4">
+          <button
+            key={s.key}
+            aria-pressed={filter === s.key}
+            onClick={() => setFilter(filter === s.key ? "all" : s.key)}
+            className={cn(
+              "panel flex items-center gap-3 p-4 text-left",
+              filter === s.key && "border-primary/40",
+            )}
+          >
             <s.icon className={cn("size-5", s.cls)} />
             <div>
-              <p className="text-2xl font-bold leading-none">{s.n}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{s.label}</p>
+              <p className="text-2xl font-bold leading-none">
+                {items.filter((i) => matches(i, s.key)).length}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{t(`downloads.${s.key}`)}</p>
             </div>
-          </div>
+          </button>
         ))}
       </div>
+      <Segmented
+        className="mt-4"
+        value={filter}
+        onChange={setFilter}
+        items={(["all", "active", "waiting", "completed", "failed"] as Filter[]).map((value) => ({
+          value,
+          label: t(`downloads.${value}`),
+        }))}
+      />
+      {(action.error || error) && (
+        <p role="alert" className="mt-4 text-xs text-destructive">
+          {t(`desktop.errors.${action.error ?? error}`)}
+        </p>
+      )}
+      {!api && <p className="mt-4 text-xs text-muted-foreground">{t("desktop.launchHint")}</p>}
       <div className="mt-5 space-y-2">
-        {items.length === 0 && (
+        {loading ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {t("common.loading")}
+          </p>
+        ) : visible.length === 0 ? (
           <div className="panel">
             <EmptyState
               icon={Download}
@@ -153,107 +184,123 @@ function DownloadsPage() {
               }
             />
           </div>
+        ) : (
+          visible.map((d) => {
+            const pct = Math.round(Math.max(0, Math.min(100, d.progress)));
+            const bytes = (value: number | undefined) =>
+              formatBytes(value, lang, t("desktop.unknown"));
+            return (
+              <div
+                key={d.id}
+                className="panel group flex items-center gap-4 p-3 transition-colors hover:border-primary/20"
+              >
+                <div className="grid aspect-video w-28 shrink-0 place-items-center rounded-md bg-surface-2">
+                  <Film className="size-8 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-semibold">{d.title}</p>
+                    <StatusBadge status={d.status} />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {mediaHost(d.sourceUrl)} ·{" "}
+                    <span className="font-mono">
+                      {d.resolution} {d.formatLabel}{" "}
+                      {d.quality === "audio"
+                        ? t("downloadDialog.originalAudio")
+                        : t(`downloadDialog.container.${d.container}`)}
+                    </span>
+                  </p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <Bar value={pct} status={d.status} className="flex-1" />
+                    <span className="w-9 text-right font-mono text-[11px]">{pct}%</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-x-4 font-mono text-[11px] text-muted-foreground">
+                    <span>
+                      {bytes(d.downloadedBytes)} / {bytes(d.totalBytes)}
+                    </span>
+                    {d.status === "downloading" && (
+                      <>
+                        <span className="text-foreground">
+                          {d.speed === undefined
+                            ? t("desktop.unknown")
+                            : t("downloads.speedValue", { value: bytes(d.speed) })}
+                        </span>
+                        <span>
+                          {t("downloads.eta")} {formatDuration(d.eta)}
+                        </span>
+                      </>
+                    )}
+                    {d.error && (
+                      <span className="font-sans text-destructive">
+                        {t(`desktop.errors.${d.error}`)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  {(activeStatuses.includes(d.status) || d.status === "queued") && (
+                    <IconBtn
+                      icon={Pause}
+                      label={t("common.pause")}
+                      disabled={action.busy}
+                      onClick={() => perform(d.id, "pause")}
+                    />
+                  )}
+                  {d.status === "paused" && (
+                    <IconBtn
+                      icon={Play}
+                      label={t("common.resume")}
+                      disabled={action.busy}
+                      onClick={() => perform(d.id, "resume")}
+                    />
+                  )}
+                  {(d.status === "failed" || d.status === "cancelled") && (
+                    <IconBtn
+                      icon={RotateCcw}
+                      label={t("common.retry")}
+                      disabled={action.busy}
+                      onClick={() => perform(d.id, "retry")}
+                    />
+                  )}
+                  {d.status === "completed" && (
+                    <IconBtn
+                      icon={Play}
+                      label={t("common.play")}
+                      disabled={action.busy}
+                      onClick={() => void play(d)}
+                    />
+                  )}
+                  <IconBtn
+                    icon={FolderOpen}
+                    label={t("common.openFolder")}
+                    disabled={action.busy || d.status !== "completed" || !d.outputPath}
+                    onClick={() => perform(d.id, "openFolder")}
+                  />
+                  {!["completed", "cancelled", "failed"].includes(d.status) && (
+                    <IconBtn
+                      icon={X}
+                      label={t("common.cancel")}
+                      disabled={action.busy}
+                      onClick={() => perform(d.id, "cancel")}
+                      className="hover:text-destructive"
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })
         )}
-        {items.map((d) => (
-          <Row
-            key={d.id}
-            d={d}
-            set={set}
-            remove={() => setItems((xs) => xs.filter((x) => x.id !== d.id))}
-          />
-        ))}
-      </div>
-      <div className="mt-4 text-right">
-        <button
-          className="text-[11px] text-muted-foreground hover:text-foreground"
-          onClick={() => setItems(items.length ? [] : seed)}
-        >
-          {items.length ? t("common.simulate") : t("common.showData")}
-        </button>
       </div>
       <AddUrlDialog open={open} onOpenChange={setOpen} />
-    </div>
-  );
-}
-
-function Row({
-  d,
-  set,
-  remove,
-}: {
-  d: DownloadItem;
-  set: (id: string, s: StatusKey) => void;
-  remove: () => void;
-}) {
-  const { t } = useT();
-  const pct = Math.round((d.done / d.total) * 100);
-  return (
-    <div className="panel group flex items-center gap-4 p-3 transition-colors hover:border-primary/20">
-      <Thumb src={d.thumb} className="w-28 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-semibold">{d.title}</p>
-          <StatusBadge status={d.status} />
-        </div>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {d.source} ·{" "}
-          <span className="font-mono">
-            {d.resolution} {d.type}
-          </span>
-        </p>
-        <div className="mt-2 flex items-center gap-3">
-          <Bar value={pct} status={d.status} className="flex-1" />
-          <span className="w-9 text-right font-mono text-[11px]">{pct}%</span>
-        </div>
-        <div className="mt-1.5 flex flex-wrap gap-x-4 font-mono text-[11px] text-muted-foreground">
-          <span>
-            {d.done.toFixed(1)} GB / {d.total.toFixed(1)} GB
-          </span>
-          {d.status === "downloading" && (
-            <>
-              <span className="text-foreground">{d.speed ?? "9.1 MB/s"}</span>
-              <span>
-                {t("downloads.eta")} {d.eta ?? "4m 02s"}
-              </span>
-            </>
-          )}
-          {d.status === "failed" && (
-            <span className="font-sans text-destructive">{t("downloads.error")}</span>
-          )}
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5">
-        {d.status === "downloading" && (
-          <IconBtn icon={Pause} label={t("common.pause")} onClick={() => set(d.id, "paused")} />
-        )}
-        {(d.status === "paused" || d.status === "queued") && (
-          <IconBtn
-            icon={Play}
-            label={t("common.resume")}
-            onClick={() => set(d.id, "downloading")}
-          />
-        )}
-        {d.status === "failed" && (
-          <Button
-            size="sm"
-            variant="subtle"
-            className="h-7"
-            onClick={() => set(d.id, "downloading")}
-          >
-            <RotateCcw />
-            {t("common.retry")}
-          </Button>
-        )}
-        <IconBtn icon={FolderOpen} label={t("common.openFolder")} />
-        {d.status !== "completed" && (
-          <IconBtn
-            icon={X}
-            label={t("common.cancel")}
-            onClick={remove}
-            className="hover:text-destructive"
-          />
-        )}
-      </div>
+      <MediaPlayerDialog
+        playback={playback}
+        error={action.error}
+        onClose={() => setPlayback(null)}
+        onExternal={(id) => {
+          if (api) void action.run(() => api.library.openExternal(id));
+        }}
+      />
     </div>
   );
 }

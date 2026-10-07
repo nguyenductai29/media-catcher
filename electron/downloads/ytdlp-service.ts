@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import type { DetectedMedia, PageAnalysis } from "../../shared/models";
 import { BinaryService, runYtDlpProcess } from "../services/binary-service";
+import type { DownloadJob } from "../../shared/models";
+import { runManagedProcess } from "../services/process-runner";
+import {
+  buildDownloadArgs,
+  parseDownloadProgress,
+  type DownloadProgress,
+} from "./download-progress";
+import { validateOwnedFile } from "./download-files";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -148,6 +156,40 @@ export function parseYtDlpMetadata(value: unknown, sourceUrl: string): PageAnaly
 
 export class YtDlpService {
   constructor(private readonly binaryService: BinaryService) {}
+
+  async download(
+    job: DownloadJob,
+    tempDirectory: string,
+    onProgress: (progress: DownloadProgress) => void,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const binary = await this.binaryService.getYtDlpPath();
+    const ffmpeg = await this.binaryService.getFFmpegPath();
+    await this.binaryService.getFFprobePath();
+    let outputPath: string | undefined;
+    await runManagedProcess(binary, buildDownloadArgs(job, tempDirectory, ffmpeg), {
+      timeout: 24 * 60 * 60 * 1000,
+      maxStdout: 64 * 1024,
+      maxStderr: 64 * 1024,
+      signal,
+      failureCode: "downloadFailed",
+      timeoutCode: "downloadFailed",
+      onStdoutLine: (line) => {
+        const progress = parseDownloadProgress(line);
+        if (progress) onProgress(progress);
+        if (line.startsWith("MV_COMPLETE:")) {
+          try {
+            const value: unknown = JSON.parse(line.slice(12));
+            if (typeof value === "string" && value.length < 4096) outputPath = value;
+          } catch {
+            /* Untrusted output never becomes a filesystem path. */
+          }
+        }
+      },
+    });
+    if (!outputPath) throw new Error("downloadFailed");
+    return validateOwnedFile(tempDirectory, outputPath);
+  }
 
   async analyze(url: string, signal?: AbortSignal): Promise<PageAnalysis> {
     if (!webUrl(url)) throw new Error("invalidUrl");

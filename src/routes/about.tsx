@@ -37,7 +37,7 @@ function AboutPage() {
           <dt className="text-muted-foreground">{t("about.license")}</dt>
           <dd className="text-right font-mono">MV-PERS-0001</dd>
         </dl>
-        <Button variant="subtle" size="sm" className="mt-6">
+        <Button variant="subtle" size="sm" className="mt-6" disabled title={t("common.comingSoon")}>
           <RefreshCw />
           {t("about.check")}
         </Button>

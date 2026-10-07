@@ -2,7 +2,7 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { extname, isAbsolute, join } from "node:path";
-import type { BinaryStatus, ErrorCode } from "../../shared/models";
+import type { BinaryDetail, BinaryStatus, BinaryStatuses, ErrorCode } from "../../shared/models";
 
 interface BinaryOptions {
   isPackaged: boolean;
@@ -31,7 +31,7 @@ function killDirect(child: ChildProcess) {
 }
 
 /** Terminate the worker before its launcher, which is needed by one-file yt-dlp builds. */
-async function terminateProcessTree(child: ChildProcess): Promise<void> {
+export async function terminateProcessTree(child: ChildProcess): Promise<void> {
   const pid = child.pid;
   if (!pid) {
     killDirect(child);
@@ -213,8 +213,20 @@ export class BinaryService {
   constructor(private readonly options: BinaryOptions) {}
 
   async getYtDlpPath(): Promise<string> {
-    const override = this.options.isPackaged ? undefined : process.env["MEDIAVAULT_YTDLP_PATH"];
-    const filename = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
+    return this.getPath("yt-dlp", "MEDIAVAULT_YTDLP_PATH");
+  }
+
+  async getFFmpegPath(): Promise<string> {
+    return this.getPath("ffmpeg", "MEDIAVAULT_FFMPEG_PATH");
+  }
+
+  async getFFprobePath(): Promise<string> {
+    return this.getPath("ffprobe", "MEDIAVAULT_FFPROBE_PATH");
+  }
+
+  private async getPath(name: string, environment: string): Promise<string> {
+    const override = this.options.isPackaged ? undefined : process.env[environment];
+    const filename = process.platform === "win32" ? `${name}.exe` : name;
     const binary =
       override ||
       (this.options.isPackaged
@@ -253,5 +265,49 @@ export class BinaryService {
     } catch {
       return { available: false, version: null };
     }
+  }
+
+  async getStatus(): Promise<BinaryStatuses> {
+    const inspect = async (tool: "yt-dlp" | "ffmpeg" | "ffprobe"): Promise<BinaryDetail> => {
+      try {
+        const binary = await (tool === "yt-dlp"
+          ? this.getYtDlpPath()
+          : tool === "ffmpeg"
+            ? this.getFFmpegPath()
+            : this.getFFprobePath());
+        const output = await runYtDlpProcess(
+          binary,
+          tool === "yt-dlp" ? ["--ignore-config", "--no-plugin-dirs", "--version"] : ["-version"],
+          {
+            timeout: 5_000,
+            maxStdout: 32_768,
+            maxStderr: 4_096,
+          },
+        );
+        const version =
+          tool === "yt-dlp"
+            ? output.trim()
+            : new RegExp(`^${tool} version ([A-Za-z0-9._+-]{1,100})(?:\\s|$)`).exec(output)?.[1];
+        if (
+          !version ||
+          (tool === "yt-dlp" && !/^\d{4}\.\d{2}\.\d{2}(?:[.\w+-]{0,40})$/.test(version))
+        )
+          throw new Error("binaryInvalid");
+        return { available: true, version, state: "ready" };
+      } catch (error) {
+        return {
+          available: false,
+          version: null,
+          state:
+            error instanceof Error && error.message === "binaryMissing" ? "missing" : "invalid",
+        };
+      }
+    };
+    const [ytDlp, ffmpeg, ffprobe] = await Promise.all([
+      inspect("yt-dlp"),
+      inspect("ffmpeg"),
+      inspect("ffprobe"),
+    ]);
+    return { ytDlp, ffmpeg, ffprobe };
   }
 }

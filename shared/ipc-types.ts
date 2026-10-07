@@ -5,6 +5,13 @@ import type {
   Result,
   ViewBounds,
   WindowState,
+  AddDownloadInput,
+  ActivityItem,
+  BinaryStatuses,
+  DownloadJob,
+  DownloadSettings,
+  ImportSummary,
+  MediaItem,
 } from "./models";
 
 export interface MediaVaultAPI {
@@ -34,6 +41,44 @@ export interface MediaVaultAPI {
     ): Promise<Result<BrowserSettings>>;
     clearCookies(): Promise<Result<void>>;
     clearBrowserData(): Promise<Result<void>>;
+    getDownloads(): Promise<Result<DownloadSettings>>;
+    updateDownloads(settings: DownloadSettings): Promise<Result<DownloadSettings>>;
+    setLanguage(language: "en" | "vi"): Promise<Result<void>>;
   };
-  binaries: { status(): Promise<Result<BinaryStatus>> };
+  binaries: {
+    status(): Promise<Result<BinaryStatus>>;
+    getStatus(): Promise<Result<BinaryStatuses>>;
+  };
+  downloads: {
+    list(): Promise<Result<DownloadJob[]>>;
+    add(input: AddDownloadInput): Promise<Result<DownloadJob>>;
+    chooseDirectory(): Promise<Result<string | null>>;
+    pause(id: string): Promise<Result<void>>;
+    resume(id: string): Promise<Result<void>>;
+    cancel(id: string): Promise<Result<void>>;
+    retry(id: string): Promise<Result<void>>;
+    pauseAll(): Promise<Result<void>>;
+    resumeAll(): Promise<Result<void>>;
+    clearCompleted(): Promise<Result<void>>;
+    openFolder(id: string): Promise<Result<void>>;
+    play(id: string): Promise<Result<string>>;
+    onChanged(listener: (jobs: DownloadJob[]) => void): () => void;
+  };
+  library: {
+    list(): Promise<Result<MediaItem[]>>;
+    addFile(): Promise<Result<ImportSummary>>;
+    addFolder(recursive: boolean): Promise<Result<ImportSummary>>;
+    refresh(): Promise<Result<MediaItem[]>>;
+    remove(id: string): Promise<Result<void>>;
+    /** Main shows the localized native confirmation before deleting. */
+    deleteFile(id: string): Promise<Result<boolean>>;
+    openFolder(id: string): Promise<Result<void>>;
+    play(id: string): Promise<Result<string>>;
+    openExternal(id: string): Promise<Result<void>>;
+    onChanged(listener: (items: MediaItem[]) => void): () => void;
+  };
+  activity: {
+    list(): Promise<Result<ActivityItem[]>>;
+    onChanged(listener: (items: ActivityItem[]) => void): () => void;
+  };
 }

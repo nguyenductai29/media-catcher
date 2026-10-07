@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { StatusKey } from "@/lib/mock";
+import type { DownloadStatus } from "../../../shared/models";
 
 export function LogoMark({ className }: { className?: string }) {
   return (
@@ -40,7 +41,10 @@ export function Logo({ compact }: { compact?: boolean }) {
   );
 }
 
-const tone: Record<StatusKey, string> = {
+const tone: Record<StatusKey | DownloadStatus, string> = {
+  analyzing: "text-info bg-info/10 ring-info/25",
+  processing: "text-info bg-info/10 ring-info/25",
+  cancelled: "text-muted-foreground bg-muted ring-border",
   downloading: "text-primary bg-primary/10 ring-primary/25",
   uploading: "text-primary bg-primary/10 ring-primary/25",
   scanning: "text-info bg-info/10 ring-info/25",
@@ -53,7 +57,13 @@ const tone: Record<StatusKey, string> = {
   failed: "text-destructive bg-destructive/10 ring-destructive/25",
 };
 
-export function StatusBadge({ status, label }: { status: StatusKey; label?: string }) {
+export function StatusBadge({
+  status,
+  label,
+}: {
+  status: StatusKey | DownloadStatus;
+  label?: string;
+}) {
   const { t } = useT();
   const live = status === "downloading" || status === "uploading" || status === "scanning";
   return (
@@ -75,7 +85,7 @@ export function Bar({
   className,
 }: {
   value: number;
-  status?: StatusKey;
+  status?: StatusKey | DownloadStatus;
   className?: string;
 }) {
   const color =

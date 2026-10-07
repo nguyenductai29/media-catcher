@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BinaryService, runYtDlpProcess } from "./binary-service";
+import { runManagedProcess } from "./process-runner";
 
 describe("BinaryService discovery", () => {
   let directory: string;
@@ -87,9 +88,52 @@ describe("BinaryService discovery", () => {
     await expect(service.getYtDlpPath()).rejects.toThrow(/^binaryMissing$/);
     await expect(service.checkVersion()).resolves.toEqual({ available: false, version: null });
   });
+
+  it("discovers both FFmpeg tools and ignores development overrides when packaged", async () => {
+    const service = new BinaryService({
+      isPackaged: false,
+      resourcesPath: directory,
+      appPath: directory,
+    });
+    const packaged = new BinaryService({
+      isPackaged: true,
+      resourcesPath: directory,
+      appPath: directory,
+    });
+    for (const tool of ["ffmpeg", "ffprobe"] as const) {
+      const custom = await executable(
+        join(directory, `${tool}${process.platform === "win32" ? ".exe" : ""}`),
+      );
+      vi.stubEnv(`MEDIAVAULT_${tool.toUpperCase()}_PATH`, custom);
+      expect(await (tool === "ffmpeg" ? service.getFFmpegPath() : service.getFFprobePath())).toBe(
+        custom,
+      );
+      await expect(
+        tool === "ffmpeg" ? packaged.getFFmpegPath() : packaged.getFFprobePath(),
+      ).rejects.toThrow(/^binaryMissing$/);
+    }
+  });
+
+  it("distinguishes missing and invalid FFmpeg executables without leaking paths", async () => {
+    const service = new BinaryService({
+      isPackaged: false,
+      resourcesPath: directory,
+      appPath: directory,
+    });
+    vi.stubEnv("MEDIAVAULT_FFMPEG_PATH", "./ffmpeg.exe");
+    vi.stubEnv("MEDIAVAULT_FFPROBE_PATH", "");
+    expect(await service.getStatus()).toEqual({
+      ytDlp: { available: false, version: null, state: "missing" },
+      ffmpeg: { available: false, version: null, state: "invalid" },
+      ffprobe: { available: false, version: null, state: "missing" },
+    });
+  });
 });
 
-describe("real analyzer process cancellation", () => {
+describe.each([
+  ["analyzer", runYtDlpProcess],
+  ["managed", runManagedProcess],
+] as const)("real %s process cancellation", (_name, run) => {
   it("terminates a launcher and its worker before rejecting cancellation", async () => {
     const directory = await mkdtemp(join(tmpdir(), "mediavault-process-tree-"));
     const marker = join(directory, "processes.json");
@@ -103,7 +147,7 @@ describe("real analyzer process cancellation", () => {
       spawn(process.execPath, ['-e', workerScript, process.argv[1], String(process.pid)], { detached: process.platform === 'win32', windowsHide: true, stdio: 'ignore' });
       setInterval(() => {}, 1000);
     `;
-    const pending = runYtDlpProcess(process.execPath, ["-e", script, marker], {
+    const pending = run(process.execPath, ["-e", script, marker], {
       signal: controller.signal,
       timeout: 15_000,
       maxStdout: 1024,
