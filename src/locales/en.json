@@ -35,7 +35,9 @@
     "comingSoon": "Prototype only — not wired yet",
     "loading": "Loading…",
     "delete": "Delete",
-    "exit": "Exit"
+    "exit": "Exit",
+    "keepFile": "Keep File",
+    "deleteLocalFile": "Delete Local File"
   },
   "status": {
     "downloading": "Downloading",
@@ -51,7 +53,9 @@
     "connected": "Connected",
     "analyzing": "Analyzing",
     "processing": "Processing",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "preparing": "Preparing",
+    "finalizing": "Verifying upload"
   },
   "browser": {
     "back": "Back",
@@ -98,7 +102,7 @@
     "error": "Connection reset by server",
     "all": "All",
     "speedValue": "{value}/s",
-    "exitConfirm": "Downloads are still active. Exit MediaVault?"
+    "exitConfirm": "Downloads or uploads are still active. Exit MediaVault?"
   },
   "library": {
     "addFile": "Add Local File",
@@ -186,7 +190,29 @@
     "notConnectedHint": "Connect your account to back up your library to the cloud.",
     "uploadingPct": "Uploading {n}%",
     "empty": "Nothing here yet",
-    "futureHint": "Google Drive sync is planned for a future release. Your files stay in the local library."
+    "futureHint": "Google Drive sync is planned for a future release. Your files stay in the local library.",
+    "unavailable": "Unavailable",
+    "connecting": "Connecting…",
+    "syncing": "Syncing…",
+    "browserHint": "Finish authorization in your browser to connect Google Drive.",
+    "connectHint": "Connect Google Drive to upload files from your local library.",
+    "rootFolder": "MediaVault folder",
+    "quotaUsed": "Used",
+    "quotaTotal": "Total",
+    "quotaAvailable": "Available",
+    "storageState": {
+      "localOnly": "Local Only",
+      "localDrive": "Local + Drive",
+      "driveOnly": "Drive Only",
+      "missing": "Local file missing"
+    },
+    "otherAccount": "Another Google account",
+    "localChanged": "Local file changed since upload",
+    "cloudMissing": "Drive copy unavailable",
+    "localMissing": "Local file unavailable",
+    "retryUpload": "Retry upload",
+    "deleteAfterUploadConfirm": "Upload completed. Delete the local file?",
+    "authorizationReceived": "Authorization received. You can return to MediaVault."
   },
   "activity": {
     "tabs": {
@@ -200,7 +226,7 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "empty": "No activity history",
-    "emptyHint": "Download and library events will appear here.",
+    "emptyHint": "Download, upload and library events will appear here.",
     "items": {
       "dlDone": "Movie A download completed",
       "upDone": "Movie A uploaded to Google Drive",
@@ -220,7 +246,17 @@
       "downloadFailed": "Download failed: {title}",
       "mediaAdded": "Added to library: {title}",
       "mediaRemoved": "Removed from library: {title}",
-      "fileDeleted": "Deleted local file: {title}"
+      "fileDeleted": "Deleted local file: {title}",
+      "driveConnected": "Connected Google Drive: {title}",
+      "driveDisconnected": "Disconnected Google Drive: {title}",
+      "driveUploadQueued": "Queued upload: {title}",
+      "driveUploadStarted": "Started uploading: {title}",
+      "driveUploadPaused": "Paused upload: {title}",
+      "driveUploadResumed": "Resumed upload: {title}",
+      "driveUploadCompleted": "Upload completed: {title}",
+      "driveUploadFailed": "Upload failed: {title}",
+      "driveUploadCancelled": "Cancelled upload: {title}",
+      "localFileDeletedAfterUpload": "Deleted local file after upload: {title}"
     }
   },
   "settings": {
@@ -243,7 +279,7 @@
     "clearData": "Clear browser data",
     "homepage": "Default homepage",
     "drive": "Google Drive",
-    "autoUpload": "Auto upload after download",
+    "autoUpload": "Automatically upload to Google Drive after download",
     "verify": "Verify upload",
     "deleteAfter": "Delete local file after successful upload",
     "deleteBehavior": "Delete behavior",
@@ -267,7 +303,12 @@
       "missing": "Not installed",
       "invalid": "Installation invalid"
     },
-    "toolsHint": "Install the media tools to download, process and inspect files."
+    "toolsHint": "Install the media tools to download, process and inspect files.",
+    "driveConcurrent": "Concurrent uploads",
+    "saveDrive": "Save Drive settings",
+    "driveSaved": "Drive settings saved",
+    "driveVerification": "Local files are deleted only after Drive confirms the uploaded file size and checksum, when available.",
+    "driveAutoHint": "New completed downloads are queued for the connected account. Reconnect that account to resume paused uploads."
   },
   "about": {
     "tagline": "Your personal media vault — browse, capture, organize and sync.",
@@ -275,7 +316,7 @@
     "build": "Build",
     "license": "Personal license",
     "check": "Check for updates",
-    "credits": "Built for Windows with yt-dlp, FFmpeg and a local media library. Google Drive sync is planned for a future release."
+    "credits": "Built for Windows with yt-dlp, FFmpeg, a local media library and Google Drive backup."
   },
   "addUrl": {
     "title": "Add Video URL",
@@ -293,7 +334,9 @@
     "speed": "Speed",
     "storage": "Storage",
     "drive": "Google Drive",
-    "version": "App version"
+    "version": "App version",
+    "uploads": "Uploads: {n} active",
+    "uploadSpeed": "Upload"
   },
   "toast": {
     "scanDone": "Found 3 media sources",
@@ -381,7 +424,22 @@
       "fileMissing": "The file could not be found. Refresh the library.",
       "fileChanged": "The file has changed. Refresh the library before trying again.",
       "fileAccessDenied": "MediaVault cannot access this file or folder.",
-      "unsupportedFormat": "This media format is not supported."
+      "unsupportedFormat": "This media format is not supported.",
+      "driveNotConfigured": "Google Drive is not configured in this build. Configure a Google OAuth Desktop client to connect.",
+      "driveNotConnected": "Connect Google Drive to continue.",
+      "driveAuthFailed": "Google Drive authorization failed. Try connecting again.",
+      "driveTokenExpired": "Google Drive authorization expired. Connect your account again.",
+      "driveSecureStorageUnavailable": "Secure account storage is unavailable on this computer. Google Drive cannot connect.",
+      "drivePermissionDenied": "Google Drive denied access. Check the connected account and file permissions.",
+      "driveQuotaExceeded": "Google Drive storage is full. Free up space and retry.",
+      "driveUploadFailed": "The upload failed. Check your connection and retry.",
+      "driveUploadSessionExpired": "The upload session expired. Retry to start a new upload.",
+      "driveFileMissing": "The Drive file could not be found. Sync to refresh its status.",
+      "driveVerificationFailed": "The Drive copy could not be verified. Your local file has been kept.",
+      "driveAccountChanged": "This file belongs to another Google account. Connect that account to continue.",
+      "driveAlreadyUploaded": "This file already has a verified Drive copy.",
+      "driveUnavailable": "Google Drive is temporarily unavailable. Try again.",
+      "networkUnavailable": "The network is unavailable. Check your connection and retry."
     },
     "downloadReady": "Choose a detected source to download.",
     "librarySize": "Library: {size}"

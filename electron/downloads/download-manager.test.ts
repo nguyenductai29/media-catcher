@@ -12,7 +12,7 @@ import { DownloadSettingsService } from "../services/download-settings-service";
 import { ActivityService } from "../services/activity-service";
 import { DownloadManager } from "./download-manager";
 import type { DownloadedFile } from "./download-worker";
-import type { DownloadJob } from "../../shared/models";
+import type { DownloadJob, MediaItem } from "../../shared/models";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -25,6 +25,7 @@ async function setup() {
     media = new MediaRepository(database);
   const settings = new DownloadSettingsService(new SettingsRepository(database), root);
   const activity = new ActivityService(new ActivityRepository(database));
+  const completed = vi.fn<(item: MediaItem) => void | Promise<void>>();
   const running = new Map<
     string,
     {
@@ -73,6 +74,7 @@ async function setup() {
       updatedAt: 1,
     }),
     onLibraryChanged: () => {},
+    onCompleted: completed,
   });
   cleanups.push(async () => {
     await manager.shutdown();
@@ -115,7 +117,18 @@ async function setup() {
       },
     });
   };
-  return { manager, add, finish, running, executor, downloads, media, settings, activity };
+  return {
+    manager,
+    add,
+    finish,
+    running,
+    executor,
+    downloads,
+    media,
+    settings,
+    activity,
+    completed,
+  };
 }
 describe("persisted download scheduler", () => {
   it("limits concurrency and continues other jobs after failure", async () => {
@@ -240,5 +253,20 @@ describe("persisted download scheduler", () => {
     await vi.waitFor(() => expect(f.downloads.get(job.id)?.status).toBe("failed"));
     expect(f.media.list()).toEqual([]);
     expect(f.downloads.get(job.id)?.error).toBe("databaseFailed");
+    expect(f.completed).not.toHaveBeenCalled();
+  });
+  it("runs auto-upload only after committed completion and isolates hook failures", async () => {
+    const f = await setup();
+    f.completed.mockImplementation((item) => {
+      expect(f.media.get(item.id)).toEqual(item);
+      expect(f.downloads.get(item.downloadId!)?.status).toBe("completed");
+      throw new Error("driveNotConnected");
+    });
+    const job = await f.add();
+    await vi.waitFor(() => expect(f.running.has(job.id)).toBe(true));
+    f.finish(job);
+    await vi.waitFor(() => expect(f.completed).toHaveBeenCalledOnce());
+    expect(f.downloads.get(job.id)?.status).toBe("completed");
+    expect(f.media.list()).toHaveLength(1);
   });
 });

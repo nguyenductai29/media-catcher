@@ -7,7 +7,7 @@ export class LocalLogger {
   private work: Promise<void> = Promise.resolve();
   constructor(private readonly userDataDirectory: string) {}
   error(
-    component: "download" | "ipc" | "startup" | "shutdown",
+    component: "download" | "upload" | "drive" | "ipc" | "startup" | "shutdown",
     code: ErrorCode,
     jobId?: string,
   ): void {

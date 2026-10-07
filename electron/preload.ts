@@ -6,6 +6,7 @@ import type {
   DownloadJob,
   MediaItem,
   WindowState,
+  DriveSnapshot,
 } from "../shared/models";
 
 function subscribe<T>(channel: string, listener: (state: T) => void) {
@@ -41,6 +42,8 @@ const api: MediaVaultAPI = {
     getDownloads: () => ipcRenderer.invoke("settings:getDownloads"),
     updateDownloads: (settings) => ipcRenderer.invoke("settings:updateDownloads", settings),
     setLanguage: (language) => ipcRenderer.invoke("settings:setLanguage", language),
+    getDrive: () => ipcRenderer.invoke("settings:getDrive"),
+    updateDrive: (settings) => ipcRenderer.invoke("settings:updateDrive", settings),
   },
   binaries: {
     status: () => ipcRenderer.invoke("binaries:status"),
@@ -76,6 +79,21 @@ const api: MediaVaultAPI = {
   activity: {
     list: () => ipcRenderer.invoke("activity:list"),
     onChanged: (listener) => subscribe<ActivityItem[]>("activity:changed", listener),
+  },
+  drive: {
+    getState: () => ipcRenderer.invoke("drive:getState"),
+    getAccount: () => ipcRenderer.invoke("drive:getAccount"),
+    connect: () => ipcRenderer.invoke("drive:connect"),
+    disconnect: () => ipcRenderer.invoke("drive:disconnect"),
+    sync: () => ipcRenderer.invoke("drive:sync"),
+    listUploads: () => ipcRenderer.invoke("drive:listUploads"),
+    upload: (id) => ipcRenderer.invoke("drive:upload", id),
+    pause: (id) => ipcRenderer.invoke("drive:pause", id),
+    resume: (id) => ipcRenderer.invoke("drive:resume", id),
+    cancel: (id) => ipcRenderer.invoke("drive:cancel", id),
+    retry: (id) => ipcRenderer.invoke("drive:retry", id),
+    open: (id) => ipcRenderer.invoke("drive:open", id),
+    onChanged: (listener) => subscribe<DriveSnapshot>("drive:changed", listener),
   },
 };
 contextBridge.exposeInMainWorld("mediaVault", api);

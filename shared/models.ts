@@ -17,7 +17,22 @@ export type ErrorCode =
   | "fileMissing"
   | "fileChanged"
   | "fileAccessDenied"
-  | "unsupportedFormat";
+  | "unsupportedFormat"
+  | "driveNotConfigured"
+  | "driveNotConnected"
+  | "driveAuthFailed"
+  | "driveTokenExpired"
+  | "driveSecureStorageUnavailable"
+  | "drivePermissionDenied"
+  | "driveQuotaExceeded"
+  | "driveUploadFailed"
+  | "driveUploadSessionExpired"
+  | "driveFileMissing"
+  | "driveVerificationFailed"
+  | "driveAccountChanged"
+  | "driveAlreadyUploaded"
+  | "driveUnavailable"
+  | "networkUnavailable";
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode };
 export interface ViewBounds {
   x: number;
@@ -168,6 +183,13 @@ export interface MediaItem {
   modifiedAt: number;
   createdAt: number;
   updatedAt: number;
+  /** Absent on legacy local-only records means true. Keep last-known path for recovery. */
+  localAvailable?: boolean;
+  driveAvailable?: boolean;
+  driveFileId?: string;
+  driveAccountId?: string;
+  driveUploadedAt?: number;
+  driveStatus?: DriveUploadStatus | "missing" | "changed";
 }
 export type ActivityType =
   | "downloadQueued"
@@ -179,7 +201,17 @@ export type ActivityType =
   | "downloadFailed"
   | "mediaAdded"
   | "mediaRemoved"
-  | "fileDeleted";
+  | "fileDeleted"
+  | "driveConnected"
+  | "driveDisconnected"
+  | "driveUploadQueued"
+  | "driveUploadStarted"
+  | "driveUploadPaused"
+  | "driveUploadResumed"
+  | "driveUploadCompleted"
+  | "driveUploadFailed"
+  | "driveUploadCancelled"
+  | "localFileDeletedAfterUpload";
 export interface ActivityItem {
   id: string;
   type: ActivityType;
@@ -201,4 +233,61 @@ export interface ImportSummary {
   added: number;
   skipped: number;
   failed: number;
+}
+
+/** Public account state only. Credentials belong exclusively to Electron Main. */
+export interface DriveAccount {
+  connected: boolean;
+  configured: boolean;
+  connecting: boolean;
+  providerAccountId?: string;
+  email?: string;
+  displayName?: string;
+  storageLimit?: number;
+  storageUsed?: number;
+  rootFolderId?: string;
+  rootFolderName?: string;
+  error?: ErrorCode;
+}
+export type DriveUploadStatus =
+  | "queued"
+  | "preparing"
+  | "uploading"
+  | "paused"
+  | "finalizing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export interface DriveUpload {
+  id: string;
+  mediaId: string;
+  providerAccountId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  driveFolderId?: string;
+  driveFileId?: string;
+  uploadedBytes: number;
+  progress: number;
+  speed?: number;
+  eta?: number;
+  status: DriveUploadStatus;
+  createdAt: number;
+  updatedAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  error?: ErrorCode;
+}
+export interface DriveSettings {
+  concurrency: number;
+  autoUpload: boolean;
+  deleteLocal: "never" | "ask" | "automatic";
+  chunkSizeMiB: number;
+}
+export interface DriveSnapshot {
+  account: DriveAccount;
+  uploads: DriveUpload[];
+  settings: DriveSettings;
+  syncing: boolean;
+  error?: ErrorCode;
 }

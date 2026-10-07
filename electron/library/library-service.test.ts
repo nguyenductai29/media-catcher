@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DownloadJob, MediaProbe } from "../../shared/models";
+import type { DownloadJob, MediaItem, MediaProbe } from "../../shared/models";
 import { SqliteDatabase } from "../database/database";
 import { MediaRepository } from "../repositories/media-repository";
 import { SettingsRepository } from "../repositories/settings-repository";
@@ -60,6 +60,43 @@ describe("local media library", () => {
     await writeFile(path, body);
     return path;
   };
+  const uploaded = async (patch: Partial<MediaItem> = {}) => {
+    const path = await fixture();
+    await service.importFiles([path]);
+    const item = {
+      ...service.list()[0]!,
+      localAvailable: true,
+      driveAvailable: true,
+      driveFileId: "drive-file",
+      driveAccountId: "account-one",
+      driveUploadedAt: 1234,
+      driveStatus: "completed" as const,
+      ...patch,
+    };
+    repository.save(item);
+    return item;
+  };
+  const expectedUpload = (item: MediaItem) => ({
+    driveFileId: "drive-file",
+    providerAccountId: "account-one",
+    fileSize: item.fileSize,
+    modifiedAt: item.modifiedAt,
+  });
+  it("keeps local bytes when disconnect aborts post-upload deletion during validation", async () => {
+    const item = await uploaded();
+    const controller = new AbortController();
+    const validate = service.validateKnownFile.bind(service);
+    vi.spyOn(service, "validateKnownFile").mockImplementationOnce(async (id) => {
+      const path = await validate(id);
+      controller.abort();
+      return path;
+    });
+    await expect(
+      service.deleteAfterUpload(item.id, expectedUpload(item), controller.signal),
+    ).rejects.toThrow("cancelled");
+    await expect(access(item.localPath)).resolves.toBeUndefined();
+    expect(repository.get(item.id)?.localAvailable).toBe(true);
+  });
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "mediavault-library-"));
     database = new SqliteDatabase(join(directory, "data"));
@@ -415,5 +452,204 @@ describe("local media library", () => {
       ),
     ).rejects.toThrow(/^cancelled$/);
     expect(service.list()).toEqual([]);
+  });
+
+  it("keeps verified Drive metadata and its thumbnail after automatic local deletion", async () => {
+    const item = await uploaded();
+    await service.deleteAfterUpload(item.id, expectedUpload(item));
+    await expect(access(item.localPath)).rejects.toThrow();
+    expect(service.get(item.id)).toMatchObject({
+      localPath: item.localPath,
+      localAvailable: false,
+      driveAvailable: true,
+      driveFileId: "drive-file",
+      driveAccountId: "account-one",
+      driveStatus: "completed",
+      thumbnailPath: item.thumbnailPath,
+    });
+    expect(await readFile(item.thumbnailPath!, "utf8")).toBe("thumbnail");
+    expect(
+      activity.list().filter((entry) => entry.type === "localFileDeletedAfterUpload"),
+    ).toHaveLength(1);
+    await expect(service.validateKnownFile(item.id)).rejects.toThrow(/^fileMissing$/);
+  });
+
+  it.each([
+    { driveAvailable: false },
+    { driveStatus: "finalizing" as const },
+    { driveStatus: "changed" as const },
+    { driveFileId: "other-file" },
+    { driveAccountId: "other-account" },
+  ])(
+    "never automatically deletes without the exact committed cloud association: %j",
+    async (patch) => {
+      const item = await uploaded(patch);
+      await expect(service.deleteAfterUpload(item.id, expectedUpload(item))).rejects.toThrow();
+      expect(await readFile(item.localPath, "utf8")).toBe("fixture media");
+      expect(activity.list().some((entry) => entry.type === "localFileDeletedAfterUpload")).toBe(
+        false,
+      );
+    },
+  );
+
+  it("rejects automatic deletion when the confirmation fingerprint or actual file changed", async () => {
+    const item = await uploaded();
+    await expect(
+      service.deleteAfterUpload(item.id, {
+        ...expectedUpload(item),
+        fileSize: item.fileSize + 1,
+      }),
+    ).rejects.toThrow(/^fileChanged$/);
+    await expect(
+      service.deleteAfterUpload(item.id, {
+        ...expectedUpload(item),
+        modifiedAt: item.modifiedAt + 1,
+      }),
+    ).rejects.toThrow(/^fileChanged$/);
+    await writeFile(item.localPath, "replacement media");
+    await expect(service.deleteAfterUpload(item.id, expectedUpload(item))).rejects.toThrow(
+      /^fileChanged$/,
+    );
+    expect(await readFile(item.localPath, "utf8")).toBe("replacement media");
+    expect(service.get(item.id).localAvailable).toBe(true);
+  });
+
+  it("rechecks a cloud association changed while local deletion was being validated", async () => {
+    const item = await uploaded();
+    const validate = service.validateKnownFile.bind(service);
+    vi.spyOn(service, "validateKnownFile").mockImplementationOnce(async (id) => {
+      const path = await validate(id);
+      repository.save({ ...service.get(id), driveAccountId: "account-two" });
+      return path;
+    });
+    await expect(service.deleteAfterUpload(item.id, expectedUpload(item))).rejects.toThrow();
+    expect(await readFile(item.localPath, "utf8")).toBe("fixture media");
+    expect(service.get(item.id).driveAccountId).toBe("account-two");
+  });
+
+  it("rechecks actual bytes after asynchronous validation before automatic unlink", async () => {
+    const item = await uploaded();
+    const validate = service.validateKnownFile.bind(service);
+    vi.spyOn(service, "validateKnownFile").mockImplementationOnce(async (id) => {
+      const path = await validate(id);
+      await writeFile(path, "replacement arrived after the initial validation");
+      return path;
+    });
+    await expect(service.deleteAfterUpload(item.id, expectedUpload(item))).rejects.toThrow(
+      /^fileChanged$/,
+    );
+    expect(await readFile(item.localPath, "utf8")).toBe(
+      "replacement arrived after the initial validation",
+    );
+    expect(service.get(item.id).localAvailable).toBe(true);
+  });
+
+  it("manual deletion keeps a Drive-only record while local-only deletion still removes it", async () => {
+    const item = await uploaded();
+    await service.deleteFile(item.id);
+    await expect(access(item.localPath)).rejects.toThrow();
+    expect(service.get(item.id)).toMatchObject({
+      localAvailable: false,
+      driveAvailable: true,
+      driveFileId: "drive-file",
+    });
+    expect(await readFile(item.thumbnailPath!, "utf8")).toBe("thumbnail");
+    expect(activity.list().some((entry) => entry.type === "fileDeleted")).toBe(true);
+    expect(activity.list().some((entry) => entry.type === "localFileDeletedAfterUpload")).toBe(
+      false,
+    );
+  });
+
+  it("refresh marks a missing local copy unavailable without losing its cloud record", async () => {
+    const item = await uploaded();
+    await unlink(item.localPath);
+    await service.refresh();
+    expect(service.get(item.id)).toMatchObject({
+      localAvailable: false,
+      driveAvailable: true,
+      driveFileId: "drive-file",
+      driveStatus: "completed",
+    });
+    expect(repository.getByPath(item.localPath)).toBeUndefined();
+    expect(await readFile(item.thumbnailPath!, "utf8")).toBe("thumbnail");
+  });
+
+  it("does not validate or claim bytes reusing the last known path of an unavailable cloud item", async () => {
+    const item = await uploaded({ localAvailable: false });
+    // Even an indistinguishable pathname/fingerprint is untrusted until an explicit refresh.
+    await expect(service.validateKnownFile(item.id)).rejects.toThrow(/^fileMissing$/);
+    await writeFile(item.localPath, "a different local movie using the same pathname");
+    await service.refresh();
+    expect(service.get(item.id)).toMatchObject({
+      localAvailable: false,
+      fileSize: 13,
+      driveFileId: "drive-file",
+    });
+    expect((await service.importFiles([item.localPath])).added).toBe(1);
+    const local = repository.getByPath(item.localPath)!;
+    expect(local.id).not.toBe(item.id);
+    expect(local.driveFileId).toBeUndefined();
+    await service.refresh();
+    expect(service.get(item.id).localAvailable).toBe(false);
+    expect(repository.getByPath(item.localPath)?.id).toBe(local.id);
+  });
+
+  it("restores availability only for the same unclaimed local file", async () => {
+    const item = await uploaded({ localAvailable: false });
+    await service.refresh();
+    expect(service.get(item.id)).toMatchObject({
+      localAvailable: true,
+      driveFileId: "drive-file",
+      driveStatus: "completed",
+    });
+    expect(await service.validateKnownFile(item.id)).toBe(item.localPath);
+  });
+
+  it("refresh preserves a cloud association but marks a changed local version unsafe for auto-delete", async () => {
+    const item = await uploaded();
+    await writeFile(item.localPath, "changed local version of the movie");
+    await service.refresh();
+    const changed = service.get(item.id);
+    expect(changed).toMatchObject({
+      localAvailable: true,
+      driveAvailable: true,
+      driveFileId: "drive-file",
+      driveAccountId: "account-one",
+      driveStatus: "changed",
+    });
+    expect(changed.fileSize).toBe(34);
+    await expect(service.deleteAfterUpload(item.id, expectedUpload(changed))).rejects.toThrow();
+    expect(await readFile(item.localPath, "utf8")).toBe("changed local version of the movie");
+  });
+
+  it("merges cloud completion committed while refresh was probing instead of dropping it", async () => {
+    const path = await fixture();
+    await service.importFiles([path]);
+    const item = service.list()[0]!;
+    await writeFile(path, "changed local version of the movie");
+    probe.mockImplementationOnce(async () => {
+      repository.save({
+        ...service.get(item.id),
+        driveAvailable: true,
+        driveFileId: "recent-file",
+        driveAccountId: "account-one",
+        driveUploadedAt: 4567,
+        driveStatus: "completed",
+      });
+      return {
+        container: "mp4",
+        fileSize: (await stat(path)).size,
+        hasVideo: true,
+        hasAudio: true,
+      };
+    });
+    await service.refresh();
+    expect(service.get(item.id)).toMatchObject({
+      driveAvailable: true,
+      driveFileId: "recent-file",
+      driveAccountId: "account-one",
+      driveUploadedAt: 4567,
+      driveStatus: "changed",
+    });
   });
 });

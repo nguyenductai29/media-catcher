@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { useT, type Lang } from "@/lib/i18n";
 import { Logo } from "./primitives";
 import { useDesktopDownloads, useDesktopLibrary } from "@/hooks/use-desktop-collections";
+import { useDesktopDrive } from "@/hooks/use-desktop-drive";
+import { hasLocalFile, runningUploadStatuses } from "@/lib/drive-display";
 import { formatBytes } from "@/lib/media-display";
 import { useDesktopWindow } from "@/hooks/use-desktop";
 import type { ErrorCode, Result } from "../../../shared/models";
@@ -63,11 +65,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { t, lang } = useT();
   const { items: jobs } = useDesktopDownloads();
   const { items: media } = useDesktopLibrary();
+  const { state: drive } = useDesktopDrive();
+  const activeUploads = drive.uploads.filter((job) => runningUploadStatuses.has(job.status));
+  const uploadSpeed = activeUploads.reduce((n, job) => n + (job.speed ?? 0), 0);
   const activeJobs = jobs.filter((job) =>
     ["analyzing", "downloading", "processing"].includes(job.status),
   );
   const librarySize = formatBytes(
-    media.reduce((n, item) => n + item.fileSize, 0),
+    media.filter(hasLocalFile).reduce((n, item) => n + item.fileSize, 0),
     lang,
     t("desktop.unknown"),
   );
@@ -118,6 +123,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         <Icon className={cn("size-[18px] shrink-0", active && "text-primary")} strokeWidth={1.75} />
         {!collapsed && <span className="truncate">{t(`nav.${item.key}`)}</span>}
+        {!collapsed && item.key === "drive" && activeUploads.length > 0 && (
+          <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-bold text-primary">
+            {activeUploads.length}
+          </span>
+        )}
         {!collapsed && item.key === "downloads" && activeJobs.length > 0 && (
           <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-bold text-primary">
             {activeJobs.length}
@@ -214,7 +224,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       {/* Status bar */}
-      <footer className="flex h-7 shrink-0 items-center gap-5 border-t border-border px-4 font-mono text-[11px] text-muted-foreground">
+      <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-border px-4 font-mono text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="size-1.5 rounded-full bg-primary" />
           {t("statusbar.downloads", { n: activeJobs.length })}
@@ -227,7 +237,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </span>
         </span>
-        <span>{t("desktop.librarySize", { size: librarySize })}</span>
+        <span>{t("statusbar.uploads", { n: activeUploads.length })}</span>
+        <span>
+          {t("statusbar.uploadSpeed")}:{" "}
+          <span className="text-foreground">
+            {t("downloads.speedValue", {
+              value: formatBytes(uploadSpeed, lang, t("desktop.unknown")),
+            })}
+          </span>
+        </span>
+        <span
+          className={cn("flex items-center gap-1.5", drive.account.connected && "text-success")}
+          title={drive.account.email ?? t("statusbar.drive")}
+        >
+          <Cloud className="size-3" />
+          {t(drive.account.connected ? "status.connected" : "drive.notConnected")}
+        </span>
 
         <span className="ml-auto">{t("statusbar.version")}: v0.1.0</span>
       </footer>

@@ -92,6 +92,37 @@ describe("desktop collection views", () => {
     page.unmount();
     expect(f.downloadListeners.size).toBe(0);
   });
+  it("disables completed download playback and reveal after verified upload removes its local file", async () => {
+    const f = desktopFixture();
+    f.api.downloads.list = async () => ({
+      ok: true,
+      value: [{ ...job, status: "completed", mediaId: media.id, outputPath: media.localPath }],
+    });
+    f.api.library.list = async () => ({ ok: true, value: [media] });
+    const play = vi.spyOn(f.api.downloads, "play"),
+      reveal = vi.spyOn(f.api.downloads, "openFolder");
+    window.mediaVault = f.api;
+    show(DownloadsRoute.options.component as ComponentType);
+    const button = await screen.findByRole("button", { name: "Play" });
+    expect(button).toBeEnabled();
+    act(() =>
+      f.emitLibrary([
+        {
+          ...media,
+          localAvailable: false,
+          driveAvailable: true,
+          driveFileId: "cloud-1",
+          driveAccountId: "account-1",
+        },
+      ]),
+    );
+    expect(button).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open Folder" })).toBeDisabled();
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Open Folder" }));
+    expect(play).not.toHaveBeenCalled();
+    expect(reveal).not.toHaveBeenCalled();
+  });
   it("keeps a library item when native deletion is cancelled and uses id based playback", async () => {
     const f = desktopFixture();
     f.api.library.list = async () => ({ ok: true, value: [media] });

@@ -1,4 +1,14 @@
-import { app, BrowserWindow, dialog, Menu, net, protocol, session } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  net,
+  protocol,
+  safeStorage,
+  session,
+  shell,
+} from "electron";
 import { isAbsolute, join, resolve } from "node:path";
 import { BrowserManager } from "./browser/browser-manager";
 import { YtDlpService } from "./downloads/ytdlp-service";
@@ -19,6 +29,14 @@ import { DownloadWorker } from "./downloads/download-worker";
 import { nativeText } from "./services/native-i18n";
 import { createAppProtocol } from "./services/app-protocol";
 import { LocalLogger } from "./services/local-logger";
+import { DriveUploadRepository } from "./repositories/drive-upload-repository";
+import { DriveSettingsService } from "./services/drive-settings-service";
+import { SecureStore } from "./drive/secure-store";
+import { GoogleAuthService } from "./drive/google-auth-service";
+import { GoogleDriveService } from "./drive/google-drive-service";
+import { UploadWorker } from "./drive/upload-worker";
+import { UploadManager } from "./drive/upload-manager";
+import { DriveCoordinator } from "./drive/drive-coordinator";
 
 app.setName("MediaVault");
 if (
@@ -75,6 +93,76 @@ else {
         settings: downloadSettings,
         activity,
       });
+      const drivePreferences = new DriveSettingsService(new SettingsRepository(database));
+      const secureStore = new SecureStore(app.getPath("userData"), {
+        isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+        encryptString: (value) => safeStorage.encryptString(value),
+        decryptString: (value) => safeStorage.decryptString(value),
+        ...(process.platform === "linux"
+          ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() }
+          : {}),
+      });
+      const auth = new GoogleAuthService({
+        ...(process.env["GOOGLE_CLIENT_ID"] ? { clientId: process.env["GOOGLE_CLIENT_ID"] } : {}),
+        ...(process.env["GOOGLE_CLIENT_SECRET"]
+          ? { clientSecret: process.env["GOOGLE_CLIENT_SECRET"] }
+          : {}),
+        store: secureStore,
+        openExternal: (url) => shell.openExternal(url),
+        callbackMessage: () =>
+          nativeText(downloadSettings.getLanguage(), "drive.authorizationReceived"),
+      });
+      const api = new GoogleDriveService({ auth });
+      // Constructors restore state only; work starts after the coordinator is initialized below.
+      const account = () => coordinator.getAccount();
+      const uploads = new UploadManager({
+        database,
+        uploads: new DriveUploadRepository(database),
+        media,
+        settings: drivePreferences,
+        activity,
+        account,
+        library,
+        executor: new UploadWorker({
+          drive: api,
+          store: secureStore,
+          library,
+          settings: drivePreferences,
+          account,
+        }),
+        onLibraryChanged: () => library.events.notify(),
+        onCompleted: (job, item) => coordinator.uploadCompleted(job, item),
+        logError: (id, code) => logger.error("upload", code, id),
+      });
+      const coordinator: DriveCoordinator = new DriveCoordinator({
+        auth,
+        api,
+        uploads,
+        media,
+        preferences: drivePreferences,
+        settings: new SettingsRepository(database),
+        library,
+        activity,
+        openExternal: (url) => shell.openExternal(url),
+        askDelete: async (item, signal) => {
+          if (!mainWindow || mainWindow.isDestroyed() || signal.aborted) return false;
+          const t = (key: string) => nativeText(downloadSettings.getLanguage(), key);
+          const answer = await dialog.showMessageBox(mainWindow, {
+            type: "question",
+            title: "MediaVault",
+            message: t("drive.deleteAfterUploadConfirm"),
+            detail: item.title,
+            buttons: [t("common.keepFile"), t("common.deleteLocalFile")],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+            signal,
+          });
+          return !signal.aborted && answer.response === 1;
+        },
+        onLibraryChanged: () => library.events.notify(),
+        logError: (code, id) => logger.error("drive", code, id),
+      });
       const downloads = new DownloadManager({
         database,
         downloads: new DownloadRepository(database),
@@ -84,6 +172,7 @@ else {
         executor: new DownloadWorker(analyzer, ffmpeg, downloadSettings),
         prepareMedia: (job, file, signal) => library.prepareDownloadedMedia(job, file, signal),
         onLibraryChanged: () => library.events.notify(),
+        onCompleted: (item) => coordinator.downloadCompleted(item),
         logError: (jobId, code) => logger.error("download", code, jobId),
       });
       let devURL: string | undefined;
@@ -134,8 +223,17 @@ else {
         settings,
         binaries,
         devURL ?? "mediavault://app",
-        { downloads, library, downloadSettings, activity, logger },
+        {
+          downloads,
+          library,
+          downloadSettings,
+          activity,
+          logger,
+          guardMedia: (id, action) => coordinator.withMediaLock(id, action),
+        },
+        coordinator,
       );
+      void coordinator.initialize().catch(() => logger.error("drive", "driveUnavailable"));
       window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       window.webContents.on("will-navigate", (event) => event.preventDefault());
       window.webContents.on("will-attach-webview", (event) => event.preventDefault());
@@ -162,7 +260,7 @@ else {
         if (closing) return;
         closing = true;
         void (async () => {
-          if (downloads.hasActiveWork()) {
+          if (downloads.hasActiveWork() || coordinator.hasActiveWork()) {
             const t = (key: string) => nativeText(downloadSettings.getLanguage(), key);
             const answer = await dialog.showMessageBox(window, {
               type: "question",
@@ -178,7 +276,7 @@ else {
               return;
             }
           }
-          await downloads.shutdown();
+          await Promise.all([coordinator.shutdown(), downloads.shutdown()]);
           await library.shutdown();
           activity.dispose();
           browser.dispose();

@@ -12,6 +12,10 @@ import type {
   DownloadSettings,
   ImportSummary,
   MediaItem,
+  DriveAccount,
+  DriveUpload,
+  DriveSettings,
+  DriveSnapshot,
 } from "./models";
 
 export interface MediaVaultAPI {
@@ -44,6 +48,8 @@ export interface MediaVaultAPI {
     getDownloads(): Promise<Result<DownloadSettings>>;
     updateDownloads(settings: DownloadSettings): Promise<Result<DownloadSettings>>;
     setLanguage(language: "en" | "vi"): Promise<Result<void>>;
+    getDrive(): Promise<Result<DriveSettings>>;
+    updateDrive(settings: DriveSettings): Promise<Result<DriveSettings>>;
   };
   binaries: {
     status(): Promise<Result<BinaryStatus>>;
@@ -80,5 +86,20 @@ export interface MediaVaultAPI {
   activity: {
     list(): Promise<Result<ActivityItem[]>>;
     onChanged(listener: (items: ActivityItem[]) => void): () => void;
+  };
+  drive: {
+    getState(): Promise<Result<DriveSnapshot>>;
+    getAccount(): Promise<Result<DriveAccount>>;
+    connect(): Promise<Result<DriveAccount>>;
+    disconnect(): Promise<Result<void>>;
+    sync(): Promise<Result<void>>;
+    listUploads(): Promise<Result<DriveUpload[]>>;
+    upload(mediaId: string): Promise<Result<DriveUpload>>;
+    pause(uploadId: string): Promise<Result<void>>;
+    resume(uploadId: string): Promise<Result<void>>;
+    cancel(uploadId: string): Promise<Result<void>>;
+    retry(uploadId: string): Promise<Result<void>>;
+    open(mediaId: string): Promise<Result<void>>;
+    onChanged(listener: (state: DriveSnapshot) => void): () => void;
   };
 }

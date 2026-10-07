@@ -4,6 +4,7 @@ import type { BrowserManager } from "../browser/browser-manager";
 import type { SettingsService } from "../services/settings-service";
 import type { BinaryService } from "../services/binary-service";
 import { registerLocalMediaIPC, type LocalMediaServices } from "./register-local-media-ipc";
+import { registerDriveIPC, type DriveIPCServices } from "./register-drive-ipc";
 
 export function validBounds(value: unknown): value is ViewBounds | null {
   if (value === null) return true;
@@ -21,6 +22,7 @@ export function registerIPC(
   binaries: BinaryService,
   trustedOrigin: string,
   localMedia?: LocalMediaServices,
+  drive?: DriveIPCServices,
 ) {
   const channels: string[] = [];
   let sessionWork: Promise<unknown> = Promise.resolve();
@@ -73,6 +75,21 @@ export function registerIPC(
           "fileChanged",
           "fileAccessDenied",
           "unsupportedFormat",
+          "driveNotConfigured",
+          "driveNotConnected",
+          "driveAuthFailed",
+          "driveTokenExpired",
+          "driveSecureStorageUnavailable",
+          "drivePermissionDenied",
+          "driveQuotaExceeded",
+          "driveUploadFailed",
+          "driveUploadSessionExpired",
+          "driveFileMissing",
+          "driveVerificationFailed",
+          "driveAccountChanged",
+          "driveAlreadyUploaded",
+          "driveUnavailable",
+          "networkUnavailable",
         ];
         const safeCode = allowed.includes(code as ErrorCode) ? (code as ErrorCode) : "unavailable";
         localMedia?.logger?.error("ipc", safeCode);
@@ -124,7 +141,9 @@ export function registerIPC(
   const removeLocalMedia = localMedia
     ? registerLocalMediaIPC(window, browser, localMedia, handle)
     : () => {};
+  const removeDrive = drive ? registerDriveIPC(window, drive, handle) : () => {};
   return () => {
+    removeDrive();
     removeLocalMedia();
     channels.forEach((channel) => ipcMain.removeHandler(channel));
   };

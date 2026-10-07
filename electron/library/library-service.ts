@@ -23,6 +23,12 @@ interface LocalFile {
   path: string;
   info: Stats;
 }
+export interface UploadedFileExpectation {
+  driveFileId: string;
+  providerAccountId: string;
+  fileSize: number;
+  modifiedAt: number;
+}
 type Outcome = "added" | "skipped";
 const formats = new Set([
   ".mp4",
@@ -191,7 +197,7 @@ export class LibraryService {
   private async importOne(
     path: string,
     signal: AbortSignal,
-    existingOnly: boolean,
+    existingId?: string,
   ): Promise<Outcome> {
     check(signal);
     if (!formats.has(extname(path).toLowerCase())) return "skipped";
@@ -205,14 +211,23 @@ export class LibraryService {
     const pending = this.limited(async (): Promise<Outcome> => {
       check(signal);
       const file = await inspectFile(original.path);
-      const previous = this.deps.media.getByPath(file.path);
-      if (existingOnly && !previous) return "skipped";
+      const owner = this.deps.media.getByPath(file.path);
+      const previous = existingId ? this.deps.media.get(existingId) : owner;
+      if (existingId && (!previous || (owner && owner.id !== existingId))) return "skipped";
+      if (previous && pathKey(previous.localPath) !== pathKey(file.path)) return "skipped";
       if (
         previous &&
         previous.fileSize === file.info.size &&
         previous.modifiedAt === file.info.mtimeMs
-      )
+      ) {
+        if (existingId && previous.localAvailable === false) {
+          this.deps.media.save({ ...previous, localAvailable: true, updatedAt: Date.now() });
+          this.events.notify();
+        }
         return "skipped";
+      }
+      // A last-known path is not permission to attach different bytes to a cloud record.
+      if (previous?.localAvailable === false) return "skipped";
       const probe = await this.deps.ffmpeg.probeMedia(file.path, signal);
       const item = await this.metadata(
         file,
@@ -226,16 +241,38 @@ export class LibraryService {
         signal,
       );
       check(signal);
-      if (previous && !this.deps.media.get(previous.id)) {
+      const latest = previous ? this.deps.media.get(previous.id) : undefined;
+      if (
+        previous &&
+        (!latest ||
+          latest.localAvailable === false ||
+          pathKey(latest.localPath) !== pathKey(previous.localPath) ||
+          latest.fileSize !== previous.fileSize ||
+          latest.modifiedAt !== previous.modifiedAt)
+      ) {
         await this.removeThumbnail(item.thumbnailPath);
         return "skipped";
+      }
+      // Upload completion can commit while ffprobe/thumbnail generation is awaited.
+      // Preserve those fields, but distinguish a newly changed local version from the cloud copy.
+      if (latest) {
+        item.id = latest.id;
+        item.createdAt = latest.createdAt;
+        if (latest.localAvailable !== undefined) item.localAvailable = true;
+        if (latest.driveAvailable !== undefined) item.driveAvailable = latest.driveAvailable;
+        if (latest.driveFileId !== undefined) item.driveFileId = latest.driveFileId;
+        if (latest.driveAccountId !== undefined) item.driveAccountId = latest.driveAccountId;
+        if (latest.driveUploadedAt !== undefined) item.driveUploadedAt = latest.driveUploadedAt;
+        if (latest.driveStatus !== undefined) item.driveStatus = latest.driveStatus;
+        if (latest.driveFileId) item.driveStatus = "changed";
+        if (!item.thumbnailPath && latest.thumbnailPath) item.thumbnailPath = latest.thumbnailPath;
       }
       this.deps.database.transaction(() => {
         this.deps.media.save(item);
         if (!previous) this.deps.activity.add("mediaAdded", item.title, { mediaId: item.id });
       });
-      if (previous?.thumbnailPath !== item.thumbnailPath)
-        await this.removeThumbnail(previous?.thumbnailPath);
+      if (latest?.thumbnailPath !== item.thumbnailPath)
+        await this.removeThumbnail(latest?.thumbnailPath);
       this.events.notify();
       return "added";
     });
@@ -247,11 +284,7 @@ export class LibraryService {
     }
   }
 
-  private async consume(
-    paths: AsyncIterable<string>,
-    signal: AbortSignal,
-    existingOnly = false,
-  ): Promise<ImportSummary> {
+  private async consume(paths: AsyncIterable<string>, signal: AbortSignal): Promise<ImportSummary> {
     const summary: ImportSummary = { added: 0, skipped: 0, failed: 0 };
     const iterator = paths[Symbol.asyncIterator]();
     try {
@@ -262,7 +295,7 @@ export class LibraryService {
             const next = await iterator.next();
             if (next.done) return;
             try {
-              summary[await this.importOne(next.value, signal, existingOnly)]++;
+              summary[await this.importOne(next.value, signal)]++;
             } catch (error) {
               if (signal.aborted || (error instanceof Error && error.message === "cancelled"))
                 throw new Error("cancelled");
@@ -311,11 +344,38 @@ export class LibraryService {
 
   refresh(): Promise<MediaItem[]> {
     return this.track(async () => {
-      await this.consume(
-        selectedFiles(this.list().map((item) => item.localPath)),
-        this.controller.signal,
-        true,
+      const items = this.list()[Symbol.iterator]();
+      const results = await Promise.allSettled(
+        Array.from({ length: 2 }, async () => {
+          for (let next = items.next(); !next.done; next = items.next()) {
+            check(this.controller.signal);
+            const item = next.value;
+            try {
+              await this.importOne(item.localPath, this.controller.signal, item.id);
+            } catch (error) {
+              check(this.controller.signal);
+              if (error instanceof Error && error.message === "cancelled") throw error;
+              if (error instanceof Error && error.message === "fileMissing") {
+                const latest = this.deps.media.get(item.id);
+                if (
+                  latest &&
+                  pathKey(latest.localPath) === pathKey(item.localPath) &&
+                  latest.fileSize === item.fileSize &&
+                  latest.modifiedAt === item.modifiedAt &&
+                  latest.localAvailable !== false
+                ) {
+                  this.deps.media.save({ ...latest, localAvailable: false, updatedAt: Date.now() });
+                  this.events.notify();
+                }
+              }
+            }
+          }
+        }),
       );
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
       return this.list();
     });
   }
@@ -323,11 +383,14 @@ export class LibraryService {
   validateKnownFile(id: string): Promise<string> {
     return this.track(async () => {
       const item = this.get(id);
+      if (item.localAvailable === false) throw new Error("fileMissing");
       const file = await inspectFile(item.localPath);
       if (pathKey(file.path) !== pathKey(item.localPath)) throw new Error("fileChanged");
       const current = await lstat(item.localPath);
       if (!current.isFile() || current.isSymbolicLink()) throw new Error("fileChanged");
       sameFile(file, item.fileSize, item.modifiedAt);
+      sameFile({ path: item.localPath, info: current }, item.fileSize, item.modifiedAt);
+      this.unchangedRecord(this.get(id), item);
       return file.path;
     });
   }
@@ -343,21 +406,73 @@ export class LibraryService {
     this.events.notify();
   }
   deleteFile(id: string): Promise<void> {
+    return this.deleteLocalFile(id);
+  }
+  deleteAfterUpload(
+    id: string,
+    expected: UploadedFileExpectation,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.deleteLocalFile(id, expected, signal);
+  }
+  private unchangedRecord(current: MediaItem, previous: MediaItem): void {
+    if (current.localAvailable === false) throw new Error("fileMissing");
+    if (
+      pathKey(current.localPath) !== pathKey(previous.localPath) ||
+      current.fileSize !== previous.fileSize ||
+      current.modifiedAt !== previous.modifiedAt
+    )
+      throw new Error("fileChanged");
+  }
+  private verifiedUpload(item: MediaItem, expected: UploadedFileExpectation): void {
+    if (item.fileSize !== expected.fileSize || item.modifiedAt !== expected.modifiedAt)
+      throw new Error("fileChanged");
+    if (item.driveAccountId !== expected.providerAccountId) throw new Error("driveAccountChanged");
+    if (
+      !expected.driveFileId ||
+      !expected.providerAccountId ||
+      item.driveAvailable !== true ||
+      item.driveStatus !== "completed" ||
+      item.driveFileId !== expected.driveFileId
+    )
+      throw new Error("driveVerificationFailed");
+  }
+  private deleteLocalFile(
+    id: string,
+    expected?: UploadedFileExpectation,
+    signal?: AbortSignal,
+  ): Promise<void> {
     return this.track(async () => {
+      if (signal) check(signal);
       const item = this.get(id);
+      if (expected) this.verifiedUpload(item, expected);
       const path = await this.validateKnownFile(id);
+      const beforeDelete = await inspectFile(item.localPath);
+      if (pathKey(beforeDelete.path) !== pathKey(path)) throw new Error("fileChanged");
+      sameFile(beforeDelete, item.fileSize, item.modifiedAt);
       check(this.controller.signal);
-      if (this.get(id).localPath !== item.localPath) throw new Error("fileChanged");
+      const current = this.get(id);
+      this.unchangedRecord(current, item);
+      if (expected) this.verifiedUpload(current, expected);
+      if (signal) check(signal);
       try {
         await unlink(path);
       } catch (error) {
         throw new Error(fileErrorCode(error) === "ENOENT" ? "fileMissing" : "fileAccessDenied");
       }
+      const latest = this.get(id);
+      const keepCloud = !!(latest.driveFileId && latest.driveAccountId);
       this.deps.database.transaction(() => {
-        this.deps.media.remove(id);
-        this.deps.activity.add("fileDeleted", item.title, { mediaId: id });
+        if (keepCloud)
+          this.deps.media.save({ ...latest, localAvailable: false, updatedAt: Date.now() });
+        else this.deps.media.remove(id);
+        this.deps.activity.add(
+          expected ? "localFileDeletedAfterUpload" : "fileDeleted",
+          latest.title,
+          { mediaId: id },
+        );
       });
-      await this.removeThumbnail(item.thumbnailPath);
+      if (!keepCloud) await this.removeThumbnail(latest.thumbnailPath);
       this.events.notify();
     });
   }

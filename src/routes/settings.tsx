@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Cloud, Database, Download, FolderOpen, Globe, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,17 +11,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PageHeader, Segmented } from "@/components/app/primitives";
+import { PageHeader, Segmented, StatusBadge } from "@/components/app/primitives";
 import { LangSwitch } from "@/components/app/AppShell";
 import { useT } from "@/lib/i18n";
 import { useDesktopAPI } from "@/hooks/use-desktop";
 import { DownloadOptions } from "@/components/app/DownloadDialog";
 import { useDesktopAction, useDesktopLibrary } from "@/hooks/use-desktop-collections";
+import { useDesktopDrive, useDriveAccountActions } from "@/hooks/use-desktop-drive";
+import { DriveAccountControls } from "@/components/app/DriveControls";
+import { hasLocalFile } from "@/lib/drive-display";
 import { formatBytes } from "@/lib/media-display";
 import type {
   BinaryStatuses,
   BrowserSettings,
   DownloadSettings,
+  DriveSettings,
   ErrorCode,
   Result,
 } from "../../shared/models";
@@ -77,7 +81,6 @@ function Toggle({ label, on = false }: { label: string; on?: boolean }) {
 }
 function SettingsPage() {
   const { t } = useT();
-  const [del, setDel] = useState("ask");
   return (
     <div className="h-full overflow-y-auto p-6">
       <PageHeader title={t("nav.settings")} />
@@ -98,26 +101,7 @@ function SettingsPage() {
         </div>
         <div className="space-y-4">
           <BrowserSettingsSection />
-          <Section icon={Cloud} title={t("settings.drive")}>
-            <p className="px-5 py-3 text-xs text-muted-foreground">{t("common.comingSoon")}</p>
-            <Toggle label={t("settings.autoUpload")} />
-            <Toggle label={t("settings.verify")} />
-            <Toggle label={t("settings.deleteAfter")} />
-            <div className="px-5 py-3">
-              <p className="mb-2 text-sm">{t("settings.deleteBehavior")}</p>
-              <fieldset disabled className="opacity-50">
-                <Segmented
-                  value={del}
-                  onChange={setDel}
-                  items={[
-                    { value: "never", label: t("settings.never") },
-                    { value: "ask", label: t("settings.ask") },
-                    { value: "auto", label: t("settings.auto") },
-                  ]}
-                />
-              </fieldset>
-            </div>
-          </Section>
+          <DriveSettingsSection />
           <StorageSection />
         </div>
       </div>
@@ -450,12 +434,140 @@ function StorageSection() {
         <p className="text-xs text-muted-foreground">
           {t("desktop.librarySize", {
             size: formatBytes(
-              items.reduce((n, item) => n + item.fileSize, 0),
+              items.filter(hasLocalFile).reduce((n, item) => n + item.fileSize, 0),
               lang,
               t("desktop.unknown"),
             ),
           })}
         </p>
+      </div>
+    </Section>
+  );
+}
+
+function DriveSettingsSection() {
+  const { t } = useT();
+  const { api, state, loading, error } = useDesktopDrive();
+  const action = useDesktopAction();
+  const accountActions = useDriveAccountActions(api);
+  const busy = action.busy || accountActions.busy;
+  const [draft, setDraft] = useState<DriveSettings | null>(null);
+  const dirty = useRef(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (api && !loading && !error && !dirty.current) setDraft(state.settings);
+  }, [api, loading, error, state.settings]);
+  const change = (patch: Partial<DriveSettings>) => {
+    dirty.current = true;
+    setSaved(false);
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+  };
+  const save = async () => {
+    if (!api || !draft) return;
+    setSaved(false);
+    const result = await action.run(() => api.settings.updateDrive(draft));
+    if (result?.ok) {
+      dirty.current = false;
+      setDraft(result.value);
+      setSaved(true);
+    }
+  };
+  const errorCode =
+    accountActions.error ?? action.error ?? error ?? state.error ?? state.account.error;
+  return (
+    <Section icon={Cloud} title={t("settings.drive")}>
+      <div className="space-y-3 px-5 py-3">
+        <p className="text-sm">
+          {state.account.connected
+            ? (state.account.email ?? state.account.displayName ?? t("status.connected"))
+            : t("drive.notConnected")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {state.account.connected
+            ? t("drive.rootFolder") +
+              ": " +
+              (state.account.rootFolderName ?? t("drive.unavailable"))
+            : t(
+                !api
+                  ? "desktop.launchHint"
+                  : !state.account.configured
+                    ? "desktop.errors.driveNotConfigured"
+                    : state.account.connecting
+                      ? "drive.browserHint"
+                      : "drive.connectHint",
+              )}
+        </p>
+        <StatusBadge
+          status={state.account.connected ? "uploaded" : "queued"}
+          label={t(state.account.connected ? "status.connected" : "drive.notConnected")}
+        />
+        <DriveAccountControls
+          state={state}
+          available={!!api}
+          busy={busy}
+          disconnecting={accountActions.command === "disconnect"}
+          onAction={(command) => void accountActions.run(command)}
+        />
+      </div>
+      <Row label={t("settings.autoUpload")}>
+        <Switch
+          aria-label={t("settings.autoUpload")}
+          checked={draft?.autoUpload ?? false}
+          disabled={!api || !draft || busy}
+          onCheckedChange={(autoUpload) => change({ autoUpload })}
+        />
+      </Row>
+      <p className="px-5 py-3 text-xs text-muted-foreground">{t("settings.driveAutoHint")}</p>
+      <Row label={t("settings.driveConcurrent")}>
+        <Select
+          value={String(draft?.concurrency ?? 2)}
+          disabled={!api || !draft || busy}
+          onValueChange={(value) => change({ concurrency: Number(value) })}
+        >
+          <SelectTrigger
+            aria-label={t("settings.driveConcurrent")}
+            className="h-8 min-w-20 bg-background"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {[1, 2, 3].map((value) => (
+              <SelectItem key={value} value={String(value)}>
+                {value}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Row>
+      <div className="space-y-2 px-5 py-3">
+        <p className="text-sm">{t("settings.deleteAfter")}</p>
+        <fieldset disabled={!api || !draft || busy} className="disabled:opacity-50">
+          <Segmented
+            value={draft?.deleteLocal ?? "never"}
+            onChange={(value) => change({ deleteLocal: value as DriveSettings["deleteLocal"] })}
+            items={[
+              { value: "never", label: t("settings.never") },
+              { value: "ask", label: t("settings.ask") },
+              { value: "automatic", label: t("settings.auto") },
+            ]}
+          />
+        </fieldset>
+        <p className="text-xs text-muted-foreground">{t("settings.driveVerification")}</p>
+      </div>
+      <div className="space-y-2 px-5 py-3">
+        <Button size="sm" disabled={!api || !draft || busy} onClick={() => void save()}>
+          {t(busy ? "desktop.saving" : "settings.saveDrive")}
+        </Button>
+        {errorCode && (
+          <p role="alert" className="text-xs text-destructive">
+            {t(`desktop.errors.${errorCode}`)}
+          </p>
+        )}
+        {saved && (
+          <p role="status" className="text-xs text-success">
+            {t("settings.driveSaved")}
+          </p>
+        )}
       </div>
     </Section>
   );

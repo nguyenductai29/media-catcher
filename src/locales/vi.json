@@ -35,7 +35,9 @@
     "comingSoon": "Bản mẫu — chưa kết nối",
     "loading": "Đang tải…",
     "delete": "Xóa",
-    "exit": "Thoát"
+    "exit": "Thoát",
+    "keepFile": "Giữ file",
+    "deleteLocalFile": "Xóa file local"
   },
   "status": {
     "downloading": "Đang tải",
@@ -51,7 +53,9 @@
     "connected": "Đã kết nối",
     "analyzing": "Đang phân tích",
     "processing": "Đang xử lý",
-    "cancelled": "Đã hủy"
+    "cancelled": "Đã hủy",
+    "preparing": "Đang chuẩn bị",
+    "finalizing": "Đang xác minh tải lên"
   },
   "browser": {
     "back": "Quay lại",
@@ -98,7 +102,7 @@
     "error": "Máy chủ đã ngắt kết nối",
     "all": "Tất cả",
     "speedValue": "{value}/giây",
-    "exitConfirm": "Vẫn còn tác vụ tải xuống đang hoạt động. Bạn có muốn thoát MediaVault không?"
+    "exitConfirm": "Vẫn còn tác vụ tải xuống hoặc tải lên đang hoạt động. Bạn có muốn thoát MediaVault không?"
   },
   "library": {
     "addFile": "Thêm file local",
@@ -186,7 +190,29 @@
     "notConnectedHint": "Kết nối tài khoản để sao lưu thư viện lên đám mây.",
     "uploadingPct": "Đang tải lên {n}%",
     "empty": "Chưa có mục nào",
-    "futureHint": "Đồng bộ Google Drive được dự kiến cho phiên bản sau. Các tệp của bạn được lưu trong thư viện cục bộ."
+    "futureHint": "Đồng bộ Google Drive được dự kiến cho phiên bản sau. Các tệp của bạn được lưu trong thư viện cục bộ.",
+    "unavailable": "Chưa có thông tin",
+    "connecting": "Đang kết nối…",
+    "syncing": "Đang đồng bộ…",
+    "browserHint": "Hoàn tất ủy quyền trong trình duyệt để kết nối Google Drive.",
+    "connectHint": "Kết nối Google Drive để tải lên các file trong thư viện local.",
+    "rootFolder": "Thư mục MediaVault",
+    "quotaUsed": "Đã dùng",
+    "quotaTotal": "Tổng dung lượng",
+    "quotaAvailable": "Còn trống",
+    "storageState": {
+      "localOnly": "Chỉ local",
+      "localDrive": "Local + Drive",
+      "driveOnly": "Chỉ Drive",
+      "missing": "Không tìm thấy file local"
+    },
+    "otherAccount": "Tài khoản Google khác",
+    "localChanged": "File local đã thay đổi sau khi tải lên",
+    "cloudMissing": "Bản sao trên Drive không khả dụng",
+    "localMissing": "File local không khả dụng",
+    "retryUpload": "Thử tải lên lại",
+    "deleteAfterUploadConfirm": "Tải lên hoàn tất. Bạn có muốn xóa file local không?",
+    "authorizationReceived": "Đã nhận được ủy quyền. Bạn có thể quay lại MediaVault."
   },
   "activity": {
     "tabs": {
@@ -200,7 +226,7 @@
     "today": "Hôm nay",
     "yesterday": "Hôm qua",
     "empty": "Chưa có lịch sử hoạt động",
-    "emptyHint": "Các sự kiện tải xuống và thư viện sẽ hiển thị tại đây.",
+    "emptyHint": "Lịch sử tải xuống, tải lên và thư viện sẽ xuất hiện ở đây.",
     "items": {
       "dlDone": "Tải Movie A hoàn tất",
       "upDone": "Movie A đã được tải lên Google Drive",
@@ -220,7 +246,17 @@
       "downloadFailed": "Tải xuống thất bại: {title}",
       "mediaAdded": "Đã thêm vào thư viện: {title}",
       "mediaRemoved": "Đã xóa khỏi thư viện: {title}",
-      "fileDeleted": "Đã xóa tệp cục bộ: {title}"
+      "fileDeleted": "Đã xóa tệp cục bộ: {title}",
+      "driveConnected": "Đã kết nối Google Drive: {title}",
+      "driveDisconnected": "Đã ngắt kết nối Google Drive: {title}",
+      "driveUploadQueued": "Đã thêm vào hàng đợi tải lên: {title}",
+      "driveUploadStarted": "Đã bắt đầu tải lên: {title}",
+      "driveUploadPaused": "Đã tạm dừng tải lên: {title}",
+      "driveUploadResumed": "Đã tiếp tục tải lên: {title}",
+      "driveUploadCompleted": "Tải lên hoàn tất: {title}",
+      "driveUploadFailed": "Tải lên thất bại: {title}",
+      "driveUploadCancelled": "Đã hủy tải lên: {title}",
+      "localFileDeletedAfterUpload": "Đã xóa file local sau khi tải lên: {title}"
     }
   },
   "settings": {
@@ -243,7 +279,7 @@
     "clearData": "Xóa dữ liệu trình duyệt",
     "homepage": "Trang chủ mặc định",
     "drive": "Google Drive",
-    "autoUpload": "Tự động tải lên sau khi tải xong",
+    "autoUpload": "Tự động tải lên Google Drive sau khi tải xuống",
     "verify": "Xác minh sau khi tải lên",
     "deleteAfter": "Xóa file local sau khi tải lên thành công",
     "deleteBehavior": "Hành vi xóa",
@@ -267,7 +303,12 @@
       "missing": "Chưa cài đặt",
       "invalid": "Bản cài đặt không hợp lệ"
     },
-    "toolsHint": "Cài đặt công cụ phương tiện để tải xuống, xử lý và kiểm tra tệp."
+    "toolsHint": "Cài đặt công cụ phương tiện để tải xuống, xử lý và kiểm tra tệp.",
+    "driveConcurrent": "Số tác vụ tải lên đồng thời",
+    "saveDrive": "Lưu cài đặt Drive",
+    "driveSaved": "Đã lưu cài đặt Drive",
+    "driveVerification": "File local chỉ được xóa sau khi Drive xác nhận dung lượng và mã kiểm tra của file đã tải lên, nếu có.",
+    "driveAutoHint": "Các bản tải xuống mới hoàn tất sẽ được thêm vào hàng đợi của tài khoản đã kết nối. Kết nối lại tài khoản đó để tiếp tục tải lên đã tạm dừng."
   },
   "about": {
     "tagline": "Kho media cá nhân — duyệt, thu thập, sắp xếp và đồng bộ.",
@@ -275,7 +316,7 @@
     "build": "Bản dựng",
     "license": "Giấy phép cá nhân",
     "check": "Kiểm tra cập nhật",
-    "credits": "Được xây dựng cho Windows với yt-dlp, FFmpeg và thư viện phương tiện cục bộ. Đồng bộ Google Drive được dự kiến cho phiên bản sau."
+    "credits": "Được xây dựng cho Windows với yt-dlp, FFmpeg, thư viện media local và sao lưu Google Drive."
   },
   "addUrl": {
     "title": "Thêm URL video",
@@ -293,7 +334,9 @@
     "speed": "Tốc độ",
     "storage": "Dung lượng",
     "drive": "Google Drive",
-    "version": "Phiên bản"
+    "version": "Phiên bản",
+    "uploads": "Tải lên: {n} đang chạy",
+    "uploadSpeed": "Tốc độ tải lên"
   },
   "toast": {
     "scanDone": "Đã tìm thấy 3 nguồn media",
@@ -381,7 +424,22 @@
       "fileMissing": "Không tìm thấy tệp. Hãy làm mới thư viện.",
       "fileChanged": "Tệp đã thay đổi. Hãy làm mới thư viện trước khi thử lại.",
       "fileAccessDenied": "MediaVault không thể truy cập tệp hoặc thư mục này.",
-      "unsupportedFormat": "Định dạng phương tiện này không được hỗ trợ."
+      "unsupportedFormat": "Định dạng phương tiện này không được hỗ trợ.",
+      "driveNotConfigured": "Google Drive chưa được cấu hình trong bản ứng dụng này. Cần cấu hình Google OAuth Desktop client để kết nối.",
+      "driveNotConnected": "Kết nối Google Drive để tiếp tục.",
+      "driveAuthFailed": "Ủy quyền Google Drive thất bại. Hãy thử kết nối lại.",
+      "driveTokenExpired": "Ủy quyền Google Drive đã hết hạn. Hãy kết nối lại tài khoản.",
+      "driveSecureStorageUnavailable": "Bộ lưu trữ tài khoản an toàn không khả dụng trên máy này. Không thể kết nối Google Drive.",
+      "drivePermissionDenied": "Google Drive từ chối truy cập. Hãy kiểm tra tài khoản đã kết nối và quyền của file.",
+      "driveQuotaExceeded": "Google Drive đã hết dung lượng. Hãy giải phóng dung lượng rồi thử lại.",
+      "driveUploadFailed": "Tải lên thất bại. Hãy kiểm tra kết nối và thử lại.",
+      "driveUploadSessionExpired": "Phiên tải lên đã hết hạn. Thử lại để bắt đầu phiên mới.",
+      "driveFileMissing": "Không tìm thấy file trên Drive. Đồng bộ để cập nhật trạng thái.",
+      "driveVerificationFailed": "Không thể xác minh bản sao trên Drive. File local vẫn được giữ lại.",
+      "driveAccountChanged": "File này thuộc tài khoản Google khác. Kết nối tài khoản đó để tiếp tục.",
+      "driveAlreadyUploaded": "File này đã có bản sao được xác minh trên Drive.",
+      "driveUnavailable": "Google Drive tạm thời không khả dụng. Hãy thử lại.",
+      "networkUnavailable": "Không có kết nối mạng. Hãy kiểm tra kết nối và thử lại."
     },
     "downloadReady": "Chọn một nguồn đã phát hiện để tải xuống.",
     "librarySize": "Thư viện: {size}"

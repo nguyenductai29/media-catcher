@@ -1,5 +1,18 @@
 import type { MediaVaultAPI } from "../../shared/ipc-types";
-import type { ActivityItem, BrowserState, DownloadJob, MediaItem } from "../../shared/models";
+import type {
+  ActivityItem,
+  BrowserState,
+  DownloadJob,
+  DriveSnapshot,
+  MediaItem,
+} from "../../shared/models";
+
+export const driveState: DriveSnapshot = {
+  account: { connected: false, configured: false, connecting: false },
+  uploads: [],
+  settings: { concurrency: 2, autoUpload: false, deleteLocal: "never", chunkSizeMiB: 8 },
+  syncing: false,
+};
 
 export const browserState: BrowserState = {
   url: "https://example.org/",
@@ -19,6 +32,7 @@ export function desktopFixture() {
   const downloadListeners = new Set<(items: DownloadJob[]) => void>();
   const libraryListeners = new Set<(items: MediaItem[]) => void>();
   const activityListeners = new Set<(items: ActivityItem[]) => void>();
+  const driveListeners = new Set<(state: DriveSnapshot) => void>();
   const success = async () => ({ ok: true as const, value: undefined });
   const api: MediaVaultAPI = {
     window: {
@@ -65,6 +79,8 @@ export function desktopFixture() {
       }),
       updateDownloads: async (settings) => ({ ok: true, value: settings }),
       setLanguage: success,
+      getDrive: async () => ({ ok: true, value: driveState.settings }),
+      updateDrive: async (settings) => ({ ok: true, value: settings }),
     },
     binaries: {
       status: async () => ({ ok: true, value: { available: true, version: "2026.01.01" } }),
@@ -140,6 +156,26 @@ export function desktopFixture() {
         };
       },
     },
+    drive: {
+      getState: async () => ({ ok: true, value: driveState }),
+      getAccount: async () => ({ ok: true, value: driveState.account }),
+      connect: async () => ({ ok: false, error: "driveNotConfigured" }),
+      disconnect: success,
+      sync: success,
+      listUploads: async () => ({ ok: true, value: [] }),
+      upload: async () => ({ ok: false, error: "driveNotConnected" }),
+      pause: success,
+      resume: success,
+      cancel: success,
+      retry: success,
+      open: success,
+      onChanged: (listener) => {
+        driveListeners.add(listener);
+        return () => {
+          driveListeners.delete(listener);
+        };
+      },
+    },
   };
   return {
     api,
@@ -147,6 +183,8 @@ export function desktopFixture() {
     downloadListeners,
     libraryListeners,
     activityListeners,
+    driveListeners,
+    emitDrive: (state: DriveSnapshot) => driveListeners.forEach((listener) => listener(state)),
     emitDownloads: (items: DownloadJob[]) =>
       downloadListeners.forEach((listener) => listener(items)),
     emitLibrary: (items: MediaItem[]) => libraryListeners.forEach((listener) => listener(items)),

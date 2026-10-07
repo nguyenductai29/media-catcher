@@ -40,6 +40,7 @@ interface Dependencies {
   executor: DownloadExecutor;
   prepareMedia(job: DownloadJob, file: DownloadedFile, signal: AbortSignal): Promise<MediaItem>;
   onLibraryChanged(): void;
+  onCompleted?(item: MediaItem): void | Promise<void>;
   logError?(jobId: string, code: ErrorCode): void;
 }
 interface Active {
@@ -251,6 +252,10 @@ export class DownloadManager {
       this.dirty.delete(job.id);
       this.events.notify();
       this.deps.onLibraryChanged();
+      // Automation sees only committed, validated media. Its failure cannot undo a local download.
+      void Promise.resolve()
+        .then(() => this.deps.onCompleted?.(media))
+        .catch(() => this.deps.logError?.(job.id, "driveUploadFailed"));
       await this.deps.executor.cleanup?.({ ...job }).catch(() => {});
     } catch (error) {
       const message = error instanceof Error ? error.message : "downloadFailed";

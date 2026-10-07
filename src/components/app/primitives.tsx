@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { StatusKey } from "@/lib/mock";
-import type { DownloadStatus } from "../../../shared/models";
+import type { DownloadStatus, DriveUploadStatus } from "../../../shared/models";
 
 export function LogoMark({ className }: { className?: string }) {
   return (
@@ -41,7 +41,9 @@ export function Logo({ compact }: { compact?: boolean }) {
   );
 }
 
-const tone: Record<StatusKey | DownloadStatus, string> = {
+const tone: Record<StatusKey | DownloadStatus | DriveUploadStatus, string> = {
+  preparing: "text-info bg-info/10 ring-info/25",
+  finalizing: "text-info bg-info/10 ring-info/25",
   analyzing: "text-info bg-info/10 ring-info/25",
   processing: "text-info bg-info/10 ring-info/25",
   cancelled: "text-muted-foreground bg-muted ring-border",
@@ -61,7 +63,7 @@ export function StatusBadge({
   status,
   label,
 }: {
-  status: StatusKey | DownloadStatus;
+  status: StatusKey | DownloadStatus | DriveUploadStatus;
   label?: string;
 }) {
   const { t } = useT();
@@ -85,7 +87,7 @@ export function Bar({
   className,
 }: {
   value: number;
-  status?: StatusKey | DownloadStatus;
+  status?: StatusKey | DownloadStatus | DriveUploadStatus;
   className?: string;
 }) {
   const color =

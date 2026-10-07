@@ -15,6 +15,7 @@ export interface LocalMediaServices {
   downloadSettings: DownloadSettingsService;
   activity: ActivityService;
   logger?: LocalLogger;
+  guardMedia?<T>(id: string, action: () => T | Promise<T>): Promise<T>;
 }
 export type RegisterHandler = (channel: string, action: (...args: unknown[]) => unknown) => void;
 export function checkedId(value: unknown): string {
@@ -29,6 +30,8 @@ export function registerLocalMediaIPC(
   handle: RegisterHandler,
 ): () => void {
   const { downloads, library, downloadSettings, activity } = services;
+  const guard = <T>(id: string, action: () => T | Promise<T>): T | Promise<T> =>
+    services.guardMedia ? services.guardMedia(id, action) : action();
   const t = (key: string) => nativeText(downloadSettings.getLanguage(), key);
   let dialogOpen = false;
   const nativeDialog = async <T>(action: () => Promise<T>): Promise<T> => {
@@ -137,7 +140,10 @@ export function registerLocalMediaIPC(
     });
   });
   handle("library:refresh", () => library.refresh());
-  handle("library:remove", (id) => library.remove(checkedId(id)));
+  handle("library:remove", (id) => {
+    const mediaId = checkedId(id);
+    return guard(mediaId, () => library.remove(mediaId));
+  });
   handle("library:deleteFile", (id) =>
     nativeDialog(async () => {
       const mediaId = checkedId(id);
@@ -152,7 +158,7 @@ export function registerLocalMediaIPC(
         noLink: true,
       });
       if (result.response !== 1) return false;
-      await library.deleteFile(mediaId);
+      await guard(mediaId, () => library.deleteFile(mediaId));
       return true;
     }),
   );

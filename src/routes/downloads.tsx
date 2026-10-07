@@ -26,7 +26,11 @@ import {
   Segmented,
   StatusBadge,
 } from "@/components/app/primitives";
-import { useDesktopDownloads, useDesktopAction } from "@/hooks/use-desktop-collections";
+import {
+  useDesktopDownloads,
+  useDesktopAction,
+  useDesktopLibrary,
+} from "@/hooks/use-desktop-collections";
 import { useT } from "@/lib/i18n";
 import { formatBytes, formatDuration, mediaHost } from "@/lib/media-display";
 import { cn } from "@/lib/utils";
@@ -61,6 +65,9 @@ function DownloadsPage() {
   const { t, lang } = useT();
   const { api, items, loading, error } = useDesktopDownloads();
   const action = useDesktopAction();
+  const { items: media } = useDesktopLibrary();
+  const localAvailable = (job: DownloadJob) =>
+    !media.some((item) => item.id === job.mediaId && item.localAvailable === false);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [playback, setPlayback] = useState<Playback | null>(null);
@@ -71,10 +78,14 @@ function DownloadsPage() {
     { key: "failed" as const, icon: AlertTriangle, cls: "text-destructive" },
   ];
   const perform = (id: string, command: "pause" | "resume" | "cancel" | "retry" | "openFolder") => {
-    if (api) void action.run(() => api.downloads[command](id));
+    if (
+      api &&
+      (command !== "openFolder" || items.some((job) => job.id === id && localAvailable(job)))
+    )
+      void action.run(() => api.downloads[command](id));
   };
   const play = async (job: DownloadJob) => {
-    if (!api) return;
+    if (!api || !localAvailable(job)) return;
     const result = await action.run(() => api.downloads.play(job.id));
     if (result?.ok) setPlayback({ url: result.value, title: job.title, mediaId: job.mediaId });
   };
@@ -267,14 +278,16 @@ function DownloadsPage() {
                     <IconBtn
                       icon={Play}
                       label={t("common.play")}
-                      disabled={action.busy}
+                      disabled={action.busy || !localAvailable(d)}
                       onClick={() => void play(d)}
                     />
                   )}
                   <IconBtn
                     icon={FolderOpen}
                     label={t("common.openFolder")}
-                    disabled={action.busy || d.status !== "completed" || !d.outputPath}
+                    disabled={
+                      action.busy || d.status !== "completed" || !d.outputPath || !localAvailable(d)
+                    }
                     onClick={() => perform(d.id, "openFolder")}
                   />
                   {!["completed", "cancelled", "failed"].includes(d.status) && (

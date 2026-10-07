@@ -23,10 +23,17 @@ interface MediaRow {
   modified_at: number;
   created_at: number;
   updated_at: number;
+  local_available: number;
+  drive_available: number;
+  drive_file_id: string | null;
+  drive_account_id: string | null;
+  drive_uploaded_at: number | null;
+  drive_status: NonNullable<MediaItem["driveStatus"]> | null;
 }
 const columns = `id, download_id, title, source_url, source_type, local_path, normalized_path,
   thumbnail_path, duration, width, height, resolution, container, video_codec, audio_codec,
-  bitrate, file_size, modified_at, created_at, updated_at`;
+  bitrate, file_size, modified_at, created_at, updated_at, local_available, drive_available,
+  drive_file_id, drive_account_id, drive_uploaded_at, drive_status`;
 const names = columns.split(",").map((name) => name.trim());
 const upsert = `INSERT INTO media (${columns}) VALUES (${names.map((name) => `@${name}`).join(", ")})
   ON CONFLICT(id) DO UPDATE SET ${names
@@ -47,7 +54,10 @@ function encode(item: MediaItem): MediaRow {
     source_url: item.sourceUrl ?? null,
     source_type: item.sourceType,
     local_path: item.localPath,
-    normalized_path: pathKey(item.localPath),
+    // An unavailable cloud item retains its old path without claiming a new file
+    // later created at that pathname. This key can never match an absolute path.
+    normalized_path:
+      item.localAvailable === false ? `unavailable:${item.id}` : pathKey(item.localPath),
     thumbnail_path: item.thumbnailPath ?? null,
     duration: item.duration,
     width: item.width,
@@ -61,6 +71,12 @@ function encode(item: MediaItem): MediaRow {
     modified_at: item.modifiedAt,
     created_at: item.createdAt,
     updated_at: item.updatedAt,
+    local_available: item.localAvailable === false ? 0 : 1,
+    drive_available: item.driveAvailable === true ? 1 : 0,
+    drive_file_id: item.driveFileId ?? null,
+    drive_account_id: item.driveAccountId ?? null,
+    drive_uploaded_at: item.driveUploadedAt ?? null,
+    drive_status: item.driveStatus ?? null,
   };
 }
 function decode(row: MediaRow): MediaItem {
@@ -85,6 +101,18 @@ function decode(row: MediaRow): MediaItem {
   if (row.video_codec !== null) item.videoCodec = row.video_codec;
   if (row.audio_codec !== null) item.audioCodec = row.audio_codec;
   if (row.bitrate !== null) item.bitrate = row.bitrate;
+  const hasDriveState =
+    row.drive_file_id !== null ||
+    row.drive_account_id !== null ||
+    row.drive_status !== null ||
+    row.drive_uploaded_at !== null ||
+    row.drive_available === 1;
+  if (row.local_available === 0 || hasDriveState) item.localAvailable = row.local_available === 1;
+  if (hasDriveState) item.driveAvailable = row.drive_available === 1;
+  if (row.drive_file_id !== null) item.driveFileId = row.drive_file_id;
+  if (row.drive_account_id !== null) item.driveAccountId = row.drive_account_id;
+  if (row.drive_uploaded_at !== null) item.driveUploadedAt = row.drive_uploaded_at;
+  if (row.drive_status !== null) item.driveStatus = row.drive_status;
   return item;
 }
 
@@ -112,7 +140,9 @@ export class MediaRepository {
   getByPath(localPath: string): MediaItem | undefined {
     return this.database.query((connection) => {
       const row = connection
-        .prepare<[string], MediaRow>(`SELECT ${columns} FROM media WHERE normalized_path = ?`)
+        .prepare<[string], MediaRow>(
+          `SELECT ${columns} FROM media WHERE normalized_path = ? AND local_available = 1`,
+        )
         .get(pathKey(localPath));
       return row ? decode(row) : undefined;
     });

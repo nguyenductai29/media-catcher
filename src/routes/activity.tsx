@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, History, Library } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Cloud, History, Library } from "lucide-react";
 import { EmptyState, PageHeader, Segmented } from "@/components/app/primitives";
 import { useDesktopActivity } from "@/hooks/use-desktop-collections";
 import { useT } from "@/lib/i18n";
@@ -21,6 +21,9 @@ export const Route = createFileRoute("/activity")({
   component: ActivityPage,
 });
 
+const isUpload = (type: string) =>
+  type.startsWith("drive") || type === "localFileDeletedAfterUpload";
+
 function ActivityPage() {
   const { t, lang } = useT();
   const { api, items, loading, error } = useDesktopActivity();
@@ -30,10 +33,12 @@ function ActivityPage() {
       (i) =>
         tab === "all" ||
         (tab === "errors"
-          ? !!i.error || i.type === "downloadFailed"
+          ? !!i.error || i.type === "downloadFailed" || i.type === "driveUploadFailed"
           : tab === "downloads"
             ? i.type.startsWith("download")
-            : !i.type.startsWith("download")),
+            : tab === "uploads"
+              ? isUpload(i.type)
+              : !i.type.startsWith("download") && !isUpload(i.type)),
     )
     .sort((a, b) => b.createdAt - a.createdAt);
   const day = (timestamp: number) => new Date(timestamp).toDateString();
@@ -55,7 +60,7 @@ function ActivityPage() {
         className="mt-5"
         value={tab}
         onChange={setTab}
-        items={["all", "downloads", "library", "errors"].map((value) => ({
+        items={["all", "downloads", "uploads", "library", "errors"].map((value) => ({
           value,
           label: t(`activity.tabs.${value}`),
         }))}
@@ -86,12 +91,17 @@ function ActivityPage() {
                       )}
               </p>
               {events.map((event) => {
-                const failed = !!event.error || event.type === "downloadFailed";
+                const failed =
+                  !!event.error ||
+                  event.type === "downloadFailed" ||
+                  event.type === "driveUploadFailed";
                 const Icon = failed
                   ? AlertTriangle
                   : event.type.startsWith("download")
                     ? CheckCircle2
-                    : Library;
+                    : isUpload(event.type)
+                      ? Cloud
+                      : Library;
                 return (
                   <div
                     key={event.id}

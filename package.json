@@ -16,6 +16,7 @@
     "setup:ytdlp": "node scripts/setup-ytdlp.mjs",
     "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
     "test:desktop": "npm run build:desktop && node scripts/smoke-electron.mjs",
+    "test:drive:manual": "node scripts/test-drive-manual.mjs",
     "test:binary-setup": "node --test electron/services/setup-ytdlp.test.mjs electron/services/setup-ffmpeg.test.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",

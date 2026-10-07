@@ -57,6 +57,47 @@ export const migrations: readonly Migration[] = [
     CREATE INDEX activity_created ON activity_logs(created_at DESC);
   `,
   },
+  {
+    version: 2,
+    sql: `
+    ALTER TABLE media ADD COLUMN local_available INTEGER NOT NULL DEFAULT 1 CHECK(local_available IN (0,1));
+    ALTER TABLE media ADD COLUMN drive_file_id TEXT;
+    ALTER TABLE media ADD COLUMN drive_account_id TEXT;
+    ALTER TABLE media ADD COLUMN drive_uploaded_at INTEGER;
+    ALTER TABLE media ADD COLUMN drive_status TEXT CHECK(drive_status IN ('queued','preparing','uploading','paused','finalizing','completed','failed','cancelled','missing','changed'));
+    ALTER TABLE media ADD COLUMN drive_available INTEGER NOT NULL DEFAULT 0 CHECK(drive_available IN (0,1));
+    CREATE INDEX media_drive_account_file ON media(drive_account_id, drive_file_id);
+    CREATE TABLE drive_uploads (
+      id TEXT PRIMARY KEY NOT NULL,
+      media_id TEXT NOT NULL, provider_account_id TEXT NOT NULL,
+      local_path TEXT NOT NULL, modified_at REAL NOT NULL,
+      file_name TEXT NOT NULL, file_size INTEGER NOT NULL CHECK(file_size >= 0), mime_type TEXT NOT NULL,
+      drive_folder_id TEXT, drive_file_id TEXT, planned_file_id TEXT,
+      uploaded_bytes INTEGER NOT NULL CHECK(uploaded_bytes >= 0 AND uploaded_bytes <= file_size),
+      progress REAL NOT NULL CHECK(progress >= 0 AND progress <= 100),
+      speed REAL CHECK(speed >= 0), eta REAL CHECK(eta >= 0),
+      status TEXT NOT NULL CHECK(status IN ('queued','preparing','uploading','paused','finalizing','completed','failed','cancelled')),
+      session_encrypted TEXT, error TEXT,
+      attempts INTEGER NOT NULL CHECK(attempts >= 0),
+      created_at INTEGER NOT NULL, started_at INTEGER, completed_at INTEGER, updated_at INTEGER NOT NULL
+    ) STRICT;
+    CREATE INDEX drive_uploads_status_created ON drive_uploads(status, created_at DESC);
+    CREATE INDEX drive_uploads_media_account ON drive_uploads(media_id, provider_account_id);
+    CREATE UNIQUE INDEX drive_uploads_one_unfinished ON drive_uploads(media_id, provider_account_id)
+      WHERE status IN ('queued','preparing','uploading','paused','finalizing','failed');
+    CREATE TABLE activity_logs_v2 (
+      id TEXT PRIMARY KEY NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('downloadQueued','downloadStarted','downloadPaused','downloadResumed','downloadCancelled','downloadCompleted','downloadFailed','mediaAdded','mediaRemoved','fileDeleted','driveConnected','driveDisconnected','driveUploadQueued','driveUploadStarted','driveUploadPaused','driveUploadResumed','driveUploadCompleted','driveUploadFailed','driveUploadCancelled','localFileDeletedAfterUpload')),
+      title TEXT NOT NULL, created_at INTEGER NOT NULL,
+      download_id TEXT, media_id TEXT, error TEXT
+    ) STRICT;
+    INSERT INTO activity_logs_v2(id,type,title,created_at,download_id,media_id,error)
+      SELECT id,type,title,created_at,download_id,media_id,error FROM activity_logs;
+    DROP TABLE activity_logs;
+    ALTER TABLE activity_logs_v2 RENAME TO activity_logs;
+    CREATE INDEX activity_created ON activity_logs(created_at DESC);
+  `,
+  },
 ];
 
 /** All pending schema changes and the version update commit together. */

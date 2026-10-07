@@ -37,3 +37,13 @@ artifacts/
 release/
 resources/bin/*
 !resources/bin/README.md
+
+# Local OAuth configuration and downloaded Google client credentials
+.env
+.env.*
+!.env.example
+client_secret*.json
+credentials.json
+auth.dat
+google-auth.dat
+/auth/

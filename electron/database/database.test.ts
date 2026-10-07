@@ -22,12 +22,13 @@ describe("SQLite startup and migrations", () => {
     const userData = join(directory, "profile");
     database = new SqliteDatabase(userData);
     const inspector = new Database(join(userData, "mediavault.db"));
-    expect(inspector.pragma("user_version", { simple: true })).toBe(1);
+    expect(inspector.pragma("user_version", { simple: true })).toBe(2);
     expect(
       inspector.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all(),
     ).toEqual([
       { name: "activity_logs" },
       { name: "downloads" },
+      { name: "drive_uploads" },
       { name: "media" },
       { name: "settings" },
     ]);

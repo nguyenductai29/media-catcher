@@ -267,6 +267,9 @@ async function launch(profile, binaryPath) {
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.MEDIAVAULT_DEV_URL;
+  // Normal smoke must never authorize Google, even in a developer's configured shell.
+  delete env.GOOGLE_CLIENT_ID;
+  delete env.GOOGLE_CLIENT_SECRET;
   if (devServer) env.MEDIAVAULT_DEV_URL = "http://127.0.0.1:5174";
   if (binaryPath !== undefined) env.MEDIAVAULT_YTDLP_PATH = binaryPath;
   app = await electron.launch({ args: ["."], cwd: root, env, timeout: 30_000 });
@@ -293,6 +296,148 @@ async function value(group, method, ...args) {
   const result = await bridge(group, method, ...args);
   assert.equal(result.ok, true, `${group}.${method} failed: ${result.error ?? "unknown"}`);
   return result.value;
+}
+const persistedDriveSettings = {
+  concurrency: 3,
+  autoUpload: false,
+  deleteLocal: "ask",
+  chunkSizeMiB: 4,
+};
+function publicDriveSnapshot(snapshot) {
+  assert.deepEqual(
+    Object.keys(snapshot)
+      .filter((key) => key !== "error")
+      .sort(),
+    ["account", "settings", "syncing", "uploads"],
+  );
+  assert.equal(typeof snapshot.syncing, "boolean");
+  const accountFields = new Set([
+    "configured",
+    "connected",
+    "connecting",
+    "providerAccountId",
+    "email",
+    "displayName",
+    "storageLimit",
+    "storageUsed",
+    "rootFolderId",
+    "rootFolderName",
+    "error",
+  ]);
+  const uploadFields = new Set([
+    "id",
+    "mediaId",
+    "providerAccountId",
+    "fileName",
+    "fileSize",
+    "mimeType",
+    "driveFolderId",
+    "driveFileId",
+    "uploadedBytes",
+    "progress",
+    "speed",
+    "eta",
+    "status",
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "completedAt",
+    "error",
+  ]);
+  assert.ok(
+    Object.keys(snapshot.account).every((key) => accountFields.has(key)),
+    "private account field exposed",
+  );
+  for (const upload of snapshot.uploads)
+    assert.ok(
+      Object.keys(upload).every((key) => uploadFields.has(key)),
+      "private upload field exposed",
+    );
+  assert.doesNotMatch(
+    JSON.stringify(snapshot),
+    /ya29\.|Bearer\s|upload_id=|access_token|refresh_token|sessionEncrypted|plannedFileId|sessionUrl|client_secret/i,
+  );
+}
+async function verifyDisconnectedDrive() {
+  const snapshot = await value("drive", "getState");
+  publicDriveSnapshot(snapshot);
+  assert.deepEqual(snapshot.account, { configured: false, connected: false, connecting: false });
+  assert.deepEqual(snapshot.uploads, []);
+  assert.deepEqual(snapshot.settings, {
+    concurrency: 2,
+    autoUpload: false,
+    deleteLocal: "never",
+    chunkSizeMiB: 8,
+  });
+  assert.deepEqual(await value("drive", "getAccount"), snapshot.account);
+  assert.deepEqual(await value("drive", "listUploads"), []);
+  assert.deepEqual(await value("settings", "getDrive"), snapshot.settings);
+  assert.deepEqual(await bridge("drive", "connect"), { ok: false, error: "driveNotConfigured" });
+  assert.deepEqual(await bridge("drive", "upload", "C:\\untrusted\\movie.mp4"), {
+    ok: false,
+    error: "invalidInput",
+  });
+  assert.deepEqual(
+    await bridge("settings", "updateDrive", { ...snapshot.settings, concurrency: 4 }),
+    { ok: false, error: "invalidInput" },
+  );
+  assert.deepEqual(
+    await bridge("settings", "updateDrive", { ...snapshot.settings, sessionUrl: "forbidden" }),
+    { ok: false, error: "invalidInput" },
+  );
+  await page.evaluate(() => {
+    window.__smokeDrive = [];
+    window.__smokeStopDrive = window.mediaVault.drive.onChanged((state) =>
+      window.__smokeDrive.push(state),
+    );
+  });
+  assert.deepEqual(
+    await value("settings", "updateDrive", persistedDriveSettings),
+    persistedDriveSettings,
+  );
+  const changed = await until(
+    "Drive settings event",
+    () => page.evaluate(() => window.__smokeDrive.at(-1)),
+    (state) => state?.settings?.concurrency === 3,
+  );
+  publicDriveSnapshot(changed);
+  await page.evaluate(() => window.__smokeStopDrive());
+  await page.getByRole("link", { name: label("nav.drive"), exact: true }).click();
+  await page.getByText(label("drive.notConnected"), { exact: true }).first().waitFor();
+  await page
+    .getByText(label("desktop.errors.driveNotConfigured"), { exact: true })
+    .first()
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: label("drive.connect"), exact: true }).isDisabled(),
+    true,
+  );
+  for (const key of ["storageLimit", "storageUsed", "email", "providerAccountId"])
+    assert.equal(
+      snapshot.account[key],
+      undefined,
+      "disconnected state invented an account or quota",
+    );
+  await page.getByRole("button", { name: "vi", exact: true }).click();
+  await page.getByText(label("drive.notConnected", "vi"), { exact: true }).first().waitFor();
+  await page
+    .getByText(label("desktop.errors.driveNotConfigured", "vi"), { exact: true })
+    .first()
+    .waitFor();
+  await page.getByRole("button", { name: "en", exact: true }).click();
+  if (process.env.MEDIAVAULT_SMOKE_ARTIFACTS) {
+    const destination = resolve(process.env.MEDIAVAULT_SMOKE_ARTIFACTS);
+    await mkdir(destination, { recursive: true });
+    await page.screenshot({ path: join(destination, "desktop-drive.png") });
+  }
+  await page.getByRole("link", { name: label("nav.settings"), exact: true }).click();
+  await page.getByRole("button", { name: label("settings.saveDrive"), exact: true }).waitFor();
+  const automatic = page.getByRole("switch", { name: label("settings.autoUpload"), exact: true });
+  assert.equal(await automatic.getAttribute("aria-checked"), "false");
+  await page.getByRole("link", { name: label("nav.browser"), exact: true }).click();
+  console.log(
+    "[desktop smoke] Credential-free Drive state, defaults/settings events, EN/VI, private DTO boundaries and validation verified.",
+  );
 }
 async function state() {
   return value("browser", "getState");
@@ -837,10 +982,12 @@ try {
     "binaries",
     "browser",
     "downloads",
+    "drive",
     "library",
     "settings",
     "window",
   ]);
+  await verifyDisconnectedDrive();
   await value("settings", "update", { homepage: `${origin}/home`, saveSession: true });
 
   // Real links and toolbar controls must move the native view and its address state.
@@ -906,7 +1053,7 @@ try {
       try {
         await foreign.loadURL(`${origin}/foreign`);
         return await foreign.webContents.executeJavaScript(
-          `window.mediaVault.settings.update(${JSON.stringify({ homepage: `${origin}/foreign-change`, saveSession: false })})`,
+          `Promise.all([window.mediaVault.settings.update(${JSON.stringify({ homepage: `${origin}/foreign-change`, saveSession: false })}), window.mediaVault.drive.getState(), window.mediaVault.settings.getDrive()])`,
         );
       } finally {
         foreign.destroy();
@@ -916,7 +1063,7 @@ try {
   );
   assert.deepEqual(
     foreignResult,
-    { ok: false, error: "unavailable" },
+    Array.from({ length: 3 }, () => ({ ok: false, error: "unavailable" })),
     "a foreign IPC sender was authorized",
   );
   assert.deepEqual(await value("settings", "get"), protectedSettings);
@@ -1135,6 +1282,8 @@ try {
   await launch("persistent-profile");
   await value("browser", "home");
   await loaded("/home");
+  assert.deepEqual(await value("settings", "getDrive"), persistedDriveSettings);
+  publicDriveSnapshot(await value("drive", "getState"));
   assert.equal((await value("settings", "get")).homepage, `${origin}/home`);
   assert.equal(
     await remote("document.cookie.split('; ').includes('mv_smoke_persist=present')"),
@@ -1218,7 +1367,7 @@ try {
   await verifyAnalysisError(invalidBinary, "binaryInvalid", "invalid-profile");
   assert.deepEqual(rendererErrors, [], "the application renderer emitted uncaught errors");
   console.log(
-    `[desktop smoke] PASS: real download/remux/probe, progress/pause/resume/cancel/retry, SQLite/Library persistence, import/play/remove/delete, navigation/detection/bounds, EN/VI/window controls, IPC/session isolation, cookie persistence, storage clearing, binary errors; ${analysisResult}.`,
+    `[desktop smoke] PASS: disconnected Drive/settings/privacy, real download/remux/probe, progress/pause/resume/cancel/retry, SQLite/Library persistence, import/play/remove/delete, navigation/detection/bounds, EN/VI/window controls, IPC/session isolation, cookie persistence, storage clearing, binary errors; ${analysisResult}.`,
   );
 } catch (error) {
   if (page) {

@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Copy,
+  ExternalLink,
+  Upload,
+  RotateCcw,
   FilePlus,
-  Film,
   FolderOpen,
   FolderPlus,
-  HardDrive,
   LayoutGrid,
   Library,
   List,
@@ -25,18 +26,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { EmptyState, IconBtn, PageHeader, Segmented } from "@/components/app/primitives";
+import { MediaAvailabilityBadges } from "@/components/app/DriveControls";
+import { MediaThumbnail } from "@/components/app/MediaThumbnail";
+import { useDesktopDrive } from "@/hooks/use-desktop-drive";
 import {
-  EmptyState,
-  IconBtn,
-  PageHeader,
-  Segmented,
-  StatusBadge,
-} from "@/components/app/primitives";
+  canOpenDrive,
+  canRetryUpload,
+  canUploadMedia,
+  hasLocalFile,
+  latestUpload,
+} from "@/lib/drive-display";
 import { MediaPlayerDialog, type Playback } from "@/components/app/MediaPlayerDialog";
 import { useDesktopLibrary, useDesktopAction } from "@/hooks/use-desktop-collections";
 import { useT } from "@/lib/i18n";
-import { formatBytes, formatDuration, mediaHost, mediaThumbnail } from "@/lib/media-display";
-import { cn } from "@/lib/utils";
+import { formatBytes, formatDuration, mediaHost } from "@/lib/media-display";
 import type { ImportSummary, MediaItem } from "../../shared/models";
 
 export const Route = createFileRoute("/library")({
@@ -58,6 +62,8 @@ function LibraryPage() {
   const { t, lang } = useT();
   const { api, items, loading, error } = useDesktopLibrary();
   const action = useDesktopAction();
+  const drive = useDesktopDrive();
+  const [connectPrompt, setConnectPrompt] = useState(false);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [source, setSource] = useState("all");
   const [sort, setSort] = useState("newest");
@@ -67,6 +73,13 @@ function LibraryPage() {
   const [notice, setNotice] = useState<ImportSummary | null>(null);
   const [playback, setPlayback] = useState<Playback | null>(null);
   const item = items.find((i) => i.id === selected) ?? null;
+  const selectedUpload = item
+    ? latestUpload(item, drive.state.uploads, drive.state.account)
+    : undefined;
+  useEffect(() => {
+    if (playback && items.some((i) => i.id === playback.mediaId && !hasLocalFile(i)))
+      setPlayback(null);
+  }, [items, playback]);
   const bytes = (size: number) => formatBytes(size, lang, t("desktop.unknown"));
   const date = (value: number) =>
     new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(value);
@@ -94,18 +107,36 @@ function LibraryPage() {
       setNotice(result.value);
   };
   const play = async (i: MediaItem) => {
-    if (!api) return;
+    if (!api || !hasLocalFile(i)) return;
     const result = await action.run(() => api.library.play(i.id));
     if (result?.ok) setPlayback({ url: result.value, title: i.title, mediaId: i.id });
   };
   const reveal = (id: string) => {
-    if (api) void action.run(() => api.library.openFolder(id));
+    if (api && items.some((i) => i.id === id && hasLocalFile(i)))
+      void action.run(() => api.library.openFolder(id));
   };
   const remove = (id: string, deleteFile: boolean) => {
-    if (api)
+    if (api && (!deleteFile || items.some((i) => i.id === id && hasLocalFile(i))))
       void action.run<boolean | void>(() =>
         deleteFile ? api.library.deleteFile(id) : api.library.remove(id),
       );
+  };
+  const uploadMedia = (i: MediaItem) => {
+    if (!api || !canUploadMedia(i, drive.state.account, drive.state.uploads)) return;
+    if (!drive.state.account.connected) {
+      setSelected(i.id);
+      setConnectPrompt(true);
+      return;
+    }
+    void action.run(() => api.drive.upload(i.id));
+  };
+  const retryUpload = (i: MediaItem) => {
+    const job = latestUpload(i, drive.state.uploads, drive.state.account);
+    if (api && job && canRetryUpload(i, job, drive.state.account))
+      void action.run(() => api.drive.retry(job.id));
+  };
+  const openDrive = (i: MediaItem) => {
+    if (api && canOpenDrive(i, drive.state.account)) void action.run(() => api.drive.open(i.id));
   };
   const metadata = (i: MediaItem) => [
     ["site", sourceName(i)],
@@ -131,7 +162,7 @@ function LibraryPage() {
         title={t("nav.library")}
         subtitle={t("library.summary", {
           n: items.length,
-          size: bytes(items.reduce((n, i) => n + i.fileSize, 0)),
+          size: bytes(items.filter(hasLocalFile).reduce((n, i) => n + i.fileSize, 0)),
         })}
         actions={
           <>
@@ -187,9 +218,9 @@ function LibraryPage() {
           </p>
         )}
       </div>
-      {(action.error || error) && (
+      {(action.error || error || drive.error) && (
         <p role="alert" className="mt-3 text-xs text-destructive">
-          {t(`desktop.errors.${action.error ?? error}`)}
+          {t(`desktop.errors.${action.error ?? error ?? drive.error}`)}
         </p>
       )}
       {!api && <p className="mt-3 text-xs text-muted-foreground">{t("desktop.launchHint")}</p>}
@@ -279,7 +310,7 @@ function LibraryPage() {
                     className="block w-full"
                     aria-label={t("library.showDetails", { title: i.title })}
                   >
-                    <MediaThumb item={i} />
+                    <MediaThumbnail item={i} />
                   </button>
                   <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] backdrop-blur">
                     {formatDuration(i.duration)}
@@ -288,15 +319,48 @@ function LibraryPage() {
                     <IconBtn
                       icon={Play}
                       label={t("common.play")}
-                      disabled={action.busy}
+                      disabled={action.busy || !hasLocalFile(i)}
                       onClick={() => void play(i)}
                     />
                     <IconBtn
                       icon={FolderOpen}
                       label={t("common.openFolder")}
-                      disabled={action.busy}
+                      disabled={action.busy || !hasLocalFile(i)}
                       onClick={() => reveal(i.id)}
                     />
+                    <IconBtn
+                      icon={Upload}
+                      label={t("common.uploadDrive")}
+                      disabled={
+                        action.busy ||
+                        !api ||
+                        !canUploadMedia(i, drive.state.account, drive.state.uploads)
+                      }
+                      onClick={() => uploadMedia(i)}
+                    />
+                    <IconBtn
+                      icon={ExternalLink}
+                      label={t("common.openInDrive")}
+                      disabled={action.busy || !api || !canOpenDrive(i, drive.state.account)}
+                      onClick={() => openDrive(i)}
+                    />
+                    {latestUpload(i, drive.state.uploads, drive.state.account)?.status ===
+                      "failed" && (
+                      <IconBtn
+                        icon={RotateCcw}
+                        label={t("drive.retryUpload")}
+                        disabled={
+                          action.busy ||
+                          !api ||
+                          !canRetryUpload(
+                            i,
+                            latestUpload(i, drive.state.uploads, drive.state.account)!,
+                            drive.state.account,
+                          )
+                        }
+                        onClick={() => retryUpload(i)}
+                      />
+                    )}
                   </div>
                 </div>
                 <button className="block w-full p-3 text-left" onClick={() => setSelected(i.id)}>
@@ -305,7 +369,13 @@ function LibraryPage() {
                     <span className="font-mono">
                       {i.resolution} · {bytes(i.fileSize)}
                     </span>
-                    <HardDrive className="size-3.5 text-success" />
+                  </div>
+                  <div className="mt-2">
+                    <MediaAvailabilityBadges
+                      item={i}
+                      account={drive.state.account}
+                      upload={latestUpload(i, drive.state.uploads, drive.state.account)}
+                    />
                   </div>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {sourceName(i)} · {date(i.createdAt)}
@@ -339,7 +409,7 @@ function LibraryPage() {
                         onClick={() => setSelected(i.id)}
                         className="flex items-center gap-3 text-left font-medium"
                       >
-                        <MediaThumb item={i} className="w-16" />
+                        <MediaThumbnail item={i} className="w-16" />
                         {i.title}
                       </button>
                     </td>
@@ -353,9 +423,10 @@ function LibraryPage() {
                       {date(i.createdAt)}
                     </td>
                     <td className="px-4">
-                      <HardDrive
-                        aria-label={t("library.localSource")}
-                        className="size-3.5 text-success"
+                      <MediaAvailabilityBadges
+                        item={i}
+                        account={drive.state.account}
+                        upload={latestUpload(i, drive.state.uploads, drive.state.account)}
                       />
                     </td>
                   </tr>
@@ -375,7 +446,7 @@ function LibraryPage() {
           {item && (
             <>
               <div className="relative">
-                <MediaThumb item={item} />
+                <MediaThumbnail item={item} />
                 <div className="absolute right-2 top-2">
                   <IconBtn
                     icon={X}
@@ -391,13 +462,17 @@ function LibraryPage() {
                 </SheetDescription>
                 <SheetTitle className="mt-1 text-lg font-bold">{item.title}</SheetTitle>
                 <div className="mt-2 flex gap-2">
-                  <StatusBadge status="localOnly" />
+                  <MediaAvailabilityBadges
+                    item={item}
+                    account={drive.state.account}
+                    upload={selectedUpload}
+                  />
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <Button
                     variant="glow"
                     size="sm"
-                    disabled={action.busy}
+                    disabled={action.busy || !hasLocalFile(item)}
                     onClick={() => void play(item)}
                   >
                     <Play />
@@ -406,7 +481,7 @@ function LibraryPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={action.busy}
+                    disabled={action.busy || !hasLocalFile(item)}
                     onClick={() => reveal(item.id)}
                   >
                     <FolderOpen />
@@ -415,14 +490,81 @@ function LibraryPage() {
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={!hasLocalFile(item)}
                     onClick={() => {
-                      void navigator.clipboard?.writeText(item.localPath).catch(() => undefined);
+                      if (hasLocalFile(item))
+                        void navigator.clipboard?.writeText(item.localPath).catch(() => undefined);
                     }}
                   >
                     <Copy />
                     {t("common.copyPath")}
                   </Button>
                 </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    disabled={
+                      action.busy ||
+                      !api ||
+                      !canUploadMedia(item, drive.state.account, drive.state.uploads)
+                    }
+                    onClick={() => uploadMedia(item)}
+                  >
+                    <Upload />
+                    {t("common.uploadDrive")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={action.busy || !api || !canOpenDrive(item, drive.state.account)}
+                    onClick={() => openDrive(item)}
+                  >
+                    <ExternalLink />
+                    {t("common.openInDrive")}
+                  </Button>
+                  {selectedUpload?.status === "failed" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        action.busy ||
+                        !api ||
+                        !canRetryUpload(item, selectedUpload, drive.state.account)
+                      }
+                      onClick={() => retryUpload(item)}
+                    >
+                      <RotateCcw />
+                      {t("drive.retryUpload")}
+                    </Button>
+                  )}
+                </div>
+                {connectPrompt && !drive.state.account.connected && (
+                  <div className="mt-3 rounded-lg border border-border bg-background p-3 text-xs">
+                    <p className="text-muted-foreground">
+                      {t(
+                        drive.state.account.configured
+                          ? "drive.connectHint"
+                          : "desktop.errors.driveNotConfigured",
+                      )}
+                    </p>
+                    <Button
+                      className="mt-2"
+                      size="sm"
+                      disabled={
+                        !api ||
+                        action.busy ||
+                        !drive.state.account.configured ||
+                        drive.state.account.connecting
+                      }
+                      onClick={() => {
+                        if (api) void action.run(() => api.drive.connect());
+                      }}
+                    >
+                      {t(drive.state.account.connecting ? "drive.connecting" : "drive.connect")}
+                    </Button>
+                  </div>
+                )}
                 <dl className="mt-5 space-y-2.5 text-xs">
                   {metadata(item).map(([key, value]) => (
                     <div key={key} className="flex justify-between gap-4">
@@ -432,6 +574,9 @@ function LibraryPage() {
                   ))}
                   <div>
                     <dt className="text-muted-foreground">{t("details.path")}</dt>
+                    {!hasLocalFile(item) && (
+                      <p className="mt-1 text-warning">{t("drive.localMissing")}</p>
+                    )}
                     <dd className="mt-1 break-all rounded-md bg-background p-2 font-mono text-[11px]">
                       {item.localPath}
                     </dd>
@@ -446,7 +591,7 @@ function LibraryPage() {
                   <Button
                     variant="danger"
                     size="sm"
-                    disabled={action.busy}
+                    disabled={action.busy || !hasLocalFile(item)}
                     onClick={() => remove(item.id, true)}
                   >
                     <Trash2 />
@@ -475,22 +620,6 @@ function LibraryPage() {
           if (api) void action.run(() => api.library.openExternal(id));
         }}
       />
-    </div>
-  );
-}
-function MediaThumb({ item, className }: { item: MediaItem; className?: string }) {
-  const [failed, setFailed] = useState(false);
-  return item.thumbnailPath && !failed ? (
-    <img
-      src={mediaThumbnail(item.id)}
-      alt=""
-      onError={() => setFailed(true)}
-      loading="lazy"
-      className={cn("aspect-video w-full object-cover", className)}
-    />
-  ) : (
-    <div className={cn("grid aspect-video w-full place-items-center bg-surface-2", className)}>
-      <Film className="size-8 text-muted-foreground" />
     </div>
   );
 }
