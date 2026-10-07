@@ -23,6 +23,17 @@ Set-Location .\media-catcher
 npm ci
 ```
 
+Keep `package-lock.json` and use `npm ci` for setup. With npm 10.9.8, resolving
+dependencies without this lockfile can fail with `Cannot read properties of null
+(reading 'edgesOut')`. Restore a deleted lockfile with
+`git restore -- package-lock.json` before installing.
+
+The lockfile also preserves `gypfile: false` for `better-sqlite3`, which already
+bundles its Windows binary. This works around npm invoking an unnecessary
+`node-gyp rebuild` ([upstream issue](https://github.com/WiseLibs/better-sqlite3/issues/1516)).
+Regenerating the lockfile can remove that field; preserve it in the
+`node_modules/better-sqlite3` entry when updating dependencies.
+
 Choose an NTFS/hard-link-capable download destination with sufficient free space.
 MediaVault preflights exclusive hard-link publication before downloading; FAT/exFAT
 and shares without this capability are unsupported download destinations. Keep
