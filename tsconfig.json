@@ -2,6 +2,9 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
+    "desktop/**/*.tsx",
+    "shared/**/*.ts",
+    "vite.desktop.config.ts",
     "vite.config.ts",
     "vitest.config.ts",
     "eslint.config.js"

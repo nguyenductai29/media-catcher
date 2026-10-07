@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import en from "@/locales/en.json";
 import vi from "@/locales/vi.json";
 
@@ -6,11 +14,20 @@ import vi from "@/locales/vi.json";
 export type Lang = "en" | "vi";
 const dictionaries: Record<Lang, unknown> = { en, vi };
 
-type Ctx = { lang: Lang; setLang: (l: Lang) => void; t: (key: string, vars?: Record<string, string | number>) => string };
+type Ctx = {
+  lang: Lang;
+  setLang: (l: Lang) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+};
 const I18nContext = createContext<Ctx | null>(null);
 
 function lookup(dict: unknown, key: string): string | undefined {
-  const v = key.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined), dict);
+  const v = key
+    .split(".")
+    .reduce<unknown>(
+      (o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined),
+      dict,
+    );
   return typeof v === "string" ? v : undefined;
 }
 
@@ -18,7 +35,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>("en");
   useEffect(() => {
     const saved = localStorage.getItem("mv-lang");
-    if (saved === "vi" || saved === "en") setLangState(saved);
+    if (saved === "vi" || saved === "en") {
+      setLangState(saved);
+      document.documentElement.lang = saved;
+    }
   }, []);
   const setLang = useCallback((l: Lang) => {
     setLangState(l);

@@ -1,58 +1,119 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Link2, Loader2 } from "lucide-react";
-import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useT } from "@/lib/i18n";
-import { Segmented } from "./primitives";
+import { useDesktopAPI } from "@/hooks/use-desktop";
+import type { ErrorCode } from "../../../shared/models";
 
-export function AddUrlDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+export function AddUrlDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { t } = useT();
-  const [url, setUrl] = useState("https://example.com/video");
-  const [quality, setQuality] = useState("best");
-  const [container, setContainer] = useState("mp4");
+  const api = useDesktopAPI();
+  const navigate = useNavigate();
+  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ErrorCode | null>(null);
+  useEffect(() => {
+    if (open && api) void api.browser.setBounds(null).catch(() => undefined);
+  }, [api, open]);
 
-  const analyze = () => {
+  const openBrowser = async (analyze: boolean) => {
+    if (!api || !url.trim()) return;
     setBusy(true);
-    setTimeout(() => {
-      setBusy(false);
+    setError(null);
+    try {
+      const result = await api.browser.open(url);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
       onOpenChange(false);
-      toast.success(t("addUrl.added"));
-    }, 1200);
+      await navigate({ to: "/" });
+      // Scan state and safe errors are published by main to the Browser page.
+      if (analyze) void api.browser.scan().catch(() => undefined);
+    } catch {
+      setError("unavailable");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
       <DialogContent className="max-w-lg border-border bg-popover">
-        <DialogHeader><DialogTitle>{t("addUrl.title")}</DialogTitle></DialogHeader>
-        <div className="flex items-center gap-2 rounded-lg border border-input bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
-          <Link2 className="size-4 text-muted-foreground" />
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t("addUrl.placeholder")} className="h-10 flex-1 bg-transparent font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground" />
-        </div>
-        <div className="space-y-4 rounded-lg border border-border bg-surface p-4">
-          <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">{t("addUrl.quality")}</p>
-            <Segmented value={quality} onChange={setQuality} items={[{ value: "best", label: t("settings.best") }, ...["2160p", "1080p", "720p", "480p"].map((v) => ({ value: v, label: v }))]} />
+        <DialogHeader>
+          <DialogTitle>{t("addUrl.title")}</DialogTitle>
+          <DialogDescription>{t("desktop.analysisHint")}</DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void openBrowser(true);
+          }}
+          className="space-y-4"
+        >
+          <div className="flex items-center gap-2 rounded-lg border border-input bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
+            <Link2 className="size-4 text-muted-foreground" />
+            <input
+              aria-label={t("desktop.address")}
+              value={url}
+              disabled={busy}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder={t("addUrl.placeholder")}
+              className="h-10 min-w-0 flex-1 bg-transparent font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground"
+            />
           </div>
-          <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">{t("addUrl.container")}</p>
-            <Segmented value={container} onChange={setContainer} items={[{ value: "mp4", label: "MP4" }, { value: "mkv", label: "MKV" }, { value: "orig", label: t("settings.original") }]} />
+          {!api && (
+            <p className="rounded-lg border border-border bg-surface p-4 text-xs text-muted-foreground">
+              {t("desktop.launchTitle")}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="text-xs text-destructive">
+              {t(`desktop.errors.${error}`)}
+            </p>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => onOpenChange(false)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!api || busy || !url.trim()}
+              onClick={() => void openBrowser(false)}
+            >
+              {t("addUrl.openBrowser")}
+            </Button>
+            <Button type="submit" variant="glow" disabled={!api || busy || !url.trim()}>
+              {busy && <Loader2 className="animate-spin" />}
+              {busy ? t("addUrl.analyzing") : t("addUrl.analyze")}
+            </Button>
           </div>
-          <label className="flex items-start gap-2 text-sm">
-            <Checkbox defaultChecked className="mt-0.5" />
-            <span>{t("addUrl.autoUpload")}</span>
-          </label>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("addUrl.openBrowser")}</Button>
-          <Button variant="glow" onClick={analyze} disabled={busy || !url}>
-            {busy && <Loader2 className="animate-spin" />}
-            {busy ? t("addUrl.analyzing") : t("addUrl.analyze")}
-          </Button>
-        </div>
+        </form>
       </DialogContent>
     </Dialog>
   );

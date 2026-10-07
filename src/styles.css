@@ -4,6 +4,9 @@
 
 @custom-variant dark (&:is(.dark *));
 
+.app-drag { -webkit-app-region: drag; }
+.app-no-drag, .app-drag button, .app-drag input, .app-drag a { -webkit-app-region: no-drag; }
+
 @theme inline {
   --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;

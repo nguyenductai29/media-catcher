@@ -30,3 +30,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+dist-desktop/
+dist-electron/
+artifacts/
+release/
+resources/bin/*
+!resources/bin/README.md
