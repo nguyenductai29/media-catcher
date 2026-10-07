@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import { Cloud, Database, Download, FolderOpen, Globe, Languages, Settings2 } from "lucide-react";
+import { Cloud, Database, Download, FolderOpen, Globe, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -97,7 +97,7 @@ function SettingsPage() {
             <div className="space-y-4 px-5 py-4">
               <div><div className="flex justify-between text-xs"><span>{t("settings.localStorage")}</span><span className="font-mono text-muted-foreground">421 GB / 500 GB</span></div><Bar value={84} status="paused" className="mt-2" /></div>
               <div><div className="flex justify-between text-xs"><span>Google Drive</span><span className="font-mono text-muted-foreground">812 GB / 2 TB</span></div><Bar value={40.6} className="mt-2" /></div>
-              <Button size="sm" variant="outline"><Languages className="hidden" />{t("settings.storageManager")}</Button>
+              <Button size="sm" variant="outline">{t("settings.storageManager")}</Button>
             </div>
           </Section>
         </div>

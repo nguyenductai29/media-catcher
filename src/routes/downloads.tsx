@@ -83,7 +83,7 @@ function Row({ d, set, remove }: { d: DownloadItem; set: (id: string, s: StatusK
         </div>
         <div className="mt-1.5 flex flex-wrap gap-x-4 font-mono text-[11px] text-muted-foreground">
           <span>{d.done.toFixed(1)} GB / {d.total.toFixed(1)} GB</span>
-          {d.status === "downloading" && <><span className="text-foreground">{d.speed}</span><span>{t("downloads.eta")} {d.eta}</span></>}
+          {d.status === "downloading" && <><span className="text-foreground">{d.speed ?? "9.1 MB/s"}</span><span>{t("downloads.eta")} {d.eta ?? "4m 02s"}</span></>}
           {d.status === "failed" && <span className="font-sans text-destructive">{t("downloads.error")}</span>}
         </div>
       </div>
